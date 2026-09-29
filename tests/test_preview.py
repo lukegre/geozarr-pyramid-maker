@@ -615,3 +615,11 @@ def test_template_store_picker(tiny, tmp_path):
     assert 'id="storepath"' in html and 'id="storeerr"' in html
     assert "/api/open?store=" in html and "browser_blocked" in html
     assert "searchParams.set('store'" in html
+
+
+def test_template_url_state(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "history.replaceState" in html and "function syncUrl" in html
+    for key in ("'store'", "'var'", "'cmap'", "'rev'", "'vmin'", "'vmax'", "'x'", "'z'"):
+        assert f"q.set({key}" in html
+    assert "applyUrlState" in html and "state.map.on('moveend', syncUrl)" in html
