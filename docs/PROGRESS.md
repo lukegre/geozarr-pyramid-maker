@@ -37,6 +37,7 @@
 | 2026-09-29 | M6 reference test (dfco2, 12 time steps) + notebook test (sonnet) | done | slow/network, excluded by default; 5/5 pass (run by main session outside sandbox); level1/2 = NumPy 2×2 nanmean of the level above |
 | 2026-09-29 | M6 dfco2 preview in headless Chrome | done | aligns with the OSM basemap; time slider OK |
 | 2026-09-29 | Open follow-ups | open | peak RSS about 1.6 GiB on the 650 MiB test (threads × shard size); OL per-level resolution vs padding (research/03); GDAL 3.13 Zarr-driver test untested (bundled GDAL 3.12.4); CI not yet run on GitHub; pre-commit-hooks rev v5.0.0; no push/PyPI yet |
+| 2026-09-29 | Preview layout redesign | done | collapsible sidebar with per-variable cards and legends (nice ticks, display names, µatm-style units), bottom time scrubber (play/step/keys, date-positioned ticks), in-page colourmap/min/max/symmetric/reset/reversed controls persisted in localStorage, keyless OSM basemaps (Light/Dark via CSS filters, OSM, None), value readout, light/dark theme; centre-longitude control was added then reverted (8b33750) – see D-24; user ran uv sync --all-extras, pytest, ruff on main: all pass; merged to main at a68aedb (fast-forward of feat/preview-layout); note subagent escalation to Sonnet:high for wrapX diagnosis |
 
 ## Next step (for the next agent)
 Push to GitHub and check CI (py3.12–3.14); user browser check of the preview; decide on the follow-ups above; then tag v0.1.0.

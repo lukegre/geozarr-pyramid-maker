@@ -73,3 +73,18 @@ call `zarr.consolidate_metadata` at the end instead of `to_zarr(consolidated=Tru
 ## D-20 — Integer fill values: 0 stays visible, NaNs explicitly hidden · accepted 2026-09-29
 Zarr v3 needs a `fill_value` on every array, and viewers (e.g. OpenLayers GeoZarr) treat it as nodata. Floats: NaN is the fill and the only hidden value. Ints with a declared `_FillValue`/`missing_value`/nodata keep it. Ints with none get a sentinel on-disk `fill_value`: dtype min (signed) / max (unsigned), or the other end if the sentinel is in CF `flag_values`. No CF `_FillValue` attr is written for the sentinel, so xarray reads the ints unmasked. Padding and antimeridian gaps use the sentinel. Bool without a fill keeps `False` (limitation).
 **Why:** the zarr default of 0 made valid zeros (e.g. an ocean class in a mask) transparent in viewers.
+
+## D-21 — Preview config extras · accepted 2026-09-29
+Per-variable `display_name` (LaTeX long_name cleaned), `units_display`, `ticks` (1/2/5×10ⁿ nice ticks, mirrored in JS `niceTicks` with shared test cases), per-dim `iso` UTC timestamps (`…Z`); existing keys unchanged.
+
+## D-22 — Colourmaps · accepted 2026-09-29
+`COLORMAPS` dict of 11-stop ramps (viridis, magma, inferno, cividis, turbo; RdBu_r, coolwarm, BrBG, PuOr) hard-coded from matplotlib (no runtime dependency); default viridis now 11 stops, `ramp` kept for back-compat; user adjustments are client-side only (localStorage `gpm-preview:style:<title>:<variable>`), Reversed resets on colourmap change; default vmin/vmax computation (2–98 % of the coarsest level, first extra-dim index) unchanged for now.
+
+## D-23 — Basemaps are keyless only · accepted 2026-09-29
+OSM tiles; Light and Dark are CSS filters on separate OSM layers (distinct className so the data layer is unfiltered); default follows prefers-color-scheme; only offered when basemap_default (EPSG:4326/3857).
+
+## D-24 — No centre-longitude / wrapX for data · accepted 2026-09-29
+Rejected, reverted in 8b33750: OL GeoZarr wraps by tile column, and derived tile widths (max 512 px from shard/chunk) don't divide the global width (level 0: 1440 px / 512 → 3 cols = 384°, 24° offset; level 1: 720/512 → 512°, 152°; only level 2 exact), giving a misaligned copy. Revisit only with write-side chunking where chunk widths divide global longitude widths at every level (would change D-06 planning); not planned.
+
+## D-25 — Scrubber behaviour · accepted 2026-09-29
+Arrows/step buttons clamp at ends, only play loops; selecting a card or pressing arrows stops playback; colliding tick labels hidden in JS.
