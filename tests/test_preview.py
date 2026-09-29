@@ -668,3 +668,9 @@ def test_serve_viewer_root(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_template_cleared_path_goes_blank(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "wanted === ''" in html and "?store=`" in html
+    assert "if (blank) q.set('store', '')" in html
