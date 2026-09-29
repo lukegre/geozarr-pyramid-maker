@@ -246,10 +246,10 @@ def test_plan_level_count_mismatch(pyramid):
 
 def test_logging_summary(pyramid, log_records):
     validate(pyramid)
-    assert ("INFO", "validation passed") in log_records
+    assert ("INFO", "Validation passed") in log_records
     _set(pyramid, "1", **{"spatial:shape": [1, 1]})
     validate(pyramid)
-    assert any(lvl == "INFO" and m.startswith("validation found") for lvl, m in log_records)
+    assert any(lvl == "ERROR" and m.startswith("Validation failed") for lvl, m in log_records)
 
 
 def test_integration_to_pyramid(tmp_path, polar_3031):

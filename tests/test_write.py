@@ -1,5 +1,6 @@
 """Tests for write.py (M2): data-only pyramid writing."""
 
+import importlib
 import json
 import warnings
 
@@ -160,7 +161,7 @@ def test_overwrite_warns(polar_3031, tmp_path, log_records):
 def test_numpy_input(numpy_backed, tmp_path, log_records):
     path = tmp_path / "o.zarr"
     res = to_pyramid(numpy_backed, str(path), tile_size=64)
-    assert any(lvl == "INFO" and "not dask" in msg for lvl, msg in log_records)
+    assert any(lvl == "DEBUG" and "not dask" in msg for lvl, msg in log_records)
     lvl = _open_level(path, 0)
     np.testing.assert_array_equal(lvl.melt.values, numpy_backed.melt.values)
     assert len(res.plan.levels) >= 2
@@ -322,18 +323,15 @@ def test_preview_is_noop(polar_3031, tmp_path, log_records):
 
 
 def test_validation_report_stored_and_logged(polar_3031, tmp_path, log_records):
-    pytest.importorskip("geozarr_pyramid_maker.validate")
     res = to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=64, validate=True)
     assert res.validation is not None
     assert all(not errs for errs in res.validation.values())
-    assert any(lvl == "INFO" and "validation passed" in msg for lvl, msg in log_records)
+    assert any(lvl == "INFO" and "Validation passed" in msg for lvl, msg in log_records)
 
 
 def test_validation_failure_logged_not_raised(polar_3031, tmp_path, log_records, monkeypatch):
-    pytest.importorskip("geozarr_pyramid_maker.validate")
-    import sys
-
-    vmod = sys.modules["geozarr_pyramid_maker.validate"]  # package attr may be the function
+    # the package attribute ``validate`` is the function, so fetch the module explicitly
+    vmod = importlib.import_module("geozarr_pyramid_maker.validate")
 
     monkeypatch.setattr(vmod, "validate", lambda *a, **k: {"spatial": ["boom"], "structure": []})
     res = to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=512, validate=True)
@@ -368,3 +366,26 @@ def test_empty_existing_dir_is_fine(polar_3031, tmp_path):
 
 def test_write_module_public():
     assert write_mod.to_pyramid is to_pyramid
+
+
+def test_info_log_is_concise_and_not_duplicated(multi_var, tmp_path):
+    from loguru import logger
+
+    records: list[tuple[str, str]] = []
+    hid = logger.add(
+        lambda m: records.append((m.record["level"].name, m.record["message"])),
+        level="INFO",
+        format="{message}",
+    )
+    try:
+        path = tmp_path / "o.zarr"
+        to_pyramid(multi_var, str(path), tile_size=16)
+    finally:
+        logger.remove(hid)
+    messages = [m for _, m in records]
+    assert len(messages) <= 12, messages
+    assert len(messages) == len(set(messages)), messages
+    assert sum("Validation passed" in m for m in messages) == 1
+    assert messages[-1].startswith("Pyramid written to ") and str(path) in messages[-1]
+    assert not any(m.rstrip().endswith(".") for m in messages)
+    print("\n".join(f"{lvl}: {m}" for lvl, m in records))

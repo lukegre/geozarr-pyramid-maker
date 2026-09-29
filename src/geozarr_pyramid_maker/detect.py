@@ -153,7 +153,7 @@ def _resolve_crs(
     )
     if (named or has_degrees) and in_range:
         logger.warning(
-            "No CRS found; inferred EPSG:4326 from lon/lat coordinates. Pass crs= to override."
+            "No CRS found; inferred EPSG:4326 from lon/lat coordinates (pass crs= to override)"
         )
         return pyproj.CRS.from_epsg(4326)
     raise DetectionError(
@@ -221,13 +221,15 @@ def _wrap_longitude(
     xv = ds[x_dim].values.astype("float64")
     dx = _grid_step(xv) if xv.size > 1 else None
     if xv.min() >= 180:
-        logger.warning(f"Longitudes are all >= 180; shifted {x_dim!r} by -360 to -180..180.")
+        logger.warning(
+            f"Longitudes are all >= 180 degrees; shifted {x_dim!r} by -360 degrees to -180..180"
+        )
         return ds.assign_coords({x_dim: xv - 360.0}), fills
 
     k = int(np.searchsorted(xv, 180.0, side="right"))  # first index with x > 180
     logger.warning(
-        f"Longitudes are in 0..360; wrapped {x_dim!r} values > 180 by -360 and re-sorted "
-        "to -180..180."
+        f"Longitudes are in 0..360 degrees; wrapped {x_dim!r} values > 180 by -360 and "
+        "re-sorted to -180..180"
     )
     ds = ds.assign_coords({x_dim: np.where(xv > 180.0, xv - 360.0, xv)})
     ds = xr.concat(
@@ -268,13 +270,13 @@ def _wrap_longitude(
                 fv = _int_fill_for(v.dtype)
                 fills[name] = fv
                 logger.warning(
-                    f"Variable {name!r} has no fill value; using {fv} for the antimeridian gap."
+                    f"Variable {name!r} has no fill value; using {fv} for the antimeridian gap"
                 )
             fill_map[name] = fv
     logger.warning(
-        f"Regional grid crosses 180 degrees: split grid with an empty gap of "
-        f"{n_full - xs.size} column(s) between the two parts, filled with the fill value "
-        f"(the grid is now {n_full} columns wide)."
+        f"Regional grid crosses the antimeridian (180 degrees); inserted a gap of "
+        f"{n_full - xs.size} column(s) filled with the fill value "
+        f"(grid is now {n_full} columns wide)"
     )
     ds = ds.reindex({x_dim: xs[0] + dx * np.arange(n_full)}, method=None, fill_value=fill_map)
     return ds, fills
@@ -317,7 +319,7 @@ def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, 
             continue
         (kept if {x_dim, y_dim} <= set(v.dims) else dropped).append(str(name))
     for name in sorted(gm_names):
-        logger.debug(f"Dropping grid-mapping variable {name!r} (rewritten on output).")
+        logger.debug(f"Dropping grid-mapping variable {name!r} (rewritten on output)")
     if dropped:
         logger.warning(
             f"Dropping variable(s) without both spatial dims ({y_dim!r}, {x_dim!r}): {dropped}"
@@ -341,7 +343,7 @@ def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, 
             f"ds.isel({x_dim}=slice(None, None, -1))."
         )
     if yv.size > 1 and yv[1] > yv[0]:
-        logger.warning(f"{y_dim!r} is ascending; flipped to descending (north-up).")
+        logger.warning(f"{y_dim!r} is ascending; flipped to descending (north-up)")
         ds = ds.isel({y_dim: slice(None, None, -1)})
 
     # ---- longitude 0..360

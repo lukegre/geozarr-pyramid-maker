@@ -125,7 +125,7 @@ def validate(
         # (via zarr_conventions, or via spatial:dimensions / proj:* / multiscales keys).
         for key, msgs in validate_group(group).items():
             report.setdefault(key, []).extend(f"{label}: {m}" for m in msgs)
-        logger.debug("validated conventions of {}", label)
+        logger.debug("Validated conventions of {}", label)
 
     add_conventions("root", root)
     rattrs = dict(root.attrs)
@@ -184,7 +184,7 @@ def validate(
                     )
         elif shape is None:
             struct.append(f"level {i}: spatial:shape is missing")
-        logger.debug("level {}: variables {}", i, sorted(vars_))
+        logger.debug("Level {}: variables {}", i, sorted(vars_))
 
     if 0 in level_vars:
         ref = set(level_vars[0])
@@ -204,9 +204,9 @@ def validate(
 
     n = sum(len(v) for v in report.values())
     if n:
-        logger.info("validation found {} problem(s)", n)
+        logger.error("Validation failed: {} problem(s)", n)
     else:
-        logger.info("validation passed")
+        logger.info("Validation passed")
     return report
 
 

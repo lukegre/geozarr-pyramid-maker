@@ -40,6 +40,11 @@ PROJ_SCHEMA_URL = (
     "https://raw.githubusercontent.com/zarr-conventions/proj/refs/tags/v0.1/schema.json"
 )
 
+# spec_url overrides too: the toolkit points at .../blob/v1/README.md (proj: zarr-experimental).
+MULTISCALES_SPEC_URL = "https://github.com/zarr-conventions/multiscales/blob/v0.1/README.md"
+SPATIAL_SPEC_URL = "https://github.com/zarr-conventions/spatial/blob/v0.1/README.md"
+PROJ_SPEC_URL = "https://github.com/zarr-conventions/proj/blob/v0.1/README.md"
+
 GRID_MAPPING_NAME = "spatial_ref"
 _CODE_RE = re.compile(r"^[A-Z]+:[0-9]+$")
 _MANAGED_PREFIXES = ("spatial:", "proj:")
@@ -49,11 +54,13 @@ _MANAGED_KEYS = ("multiscales", "zarr_conventions")
 def convention_metadata() -> tuple[
     MultiscalesConventionMetadata, SpatialConventionMetadata, ProjConventionMetadata
 ]:
-    """The three convention registrations with the D-16 ``schema_url`` overrides."""
+    """The three convention registrations with the D-16 ``schema_url``/``spec_url`` overrides."""
     return (
-        MultiscalesConventionMetadata(schema_url=MULTISCALES_SCHEMA_URL),
-        SpatialConventionMetadata(schema_url=SPATIAL_SCHEMA_URL),
-        ProjConventionMetadata(schema_url=PROJ_SCHEMA_URL),
+        MultiscalesConventionMetadata(
+            schema_url=MULTISCALES_SCHEMA_URL, spec_url=MULTISCALES_SPEC_URL
+        ),
+        SpatialConventionMetadata(schema_url=SPATIAL_SCHEMA_URL, spec_url=SPATIAL_SPEC_URL),
+        ProjConventionMetadata(schema_url=PROJ_SCHEMA_URL, spec_url=PROJ_SPEC_URL),
     )
 
 

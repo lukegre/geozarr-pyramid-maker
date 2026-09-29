@@ -333,7 +333,7 @@ def test_antimeridian_gap(regional_antimeridian, log_records):
     assert _val(v.sel(lon=170.5, lat=9.5)) == 0
     assert _val(v.sel(lon=-170.5, lat=9.5)) == 19  # lon 189.5, col 19
     assert _val(v.sel(lon=-179.5, lat=0.5)) == 9 * 1000 + 10  # lon 180.5 is col 10 of row 9
-    assert any("split" in w.lower() for w in _warnings(log_records))
+    assert any("antimeridian" in w.lower() for w in _warnings(log_records))
 
 
 def test_antimeridian_int_gap_uses_fill():

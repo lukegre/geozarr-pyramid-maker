@@ -27,8 +27,10 @@ def _ds(arr, dims=None, chunks=None, dx=10.0, dy=-10.0, x0=105.0, y0=995.0, attr
     return ds.chunk(chunks) if chunks else ds.chunk()
 
 
-def _run(ds, method, fill=None):
-    return downsample(ds, x_dim=X, y_dim=Y, methods={"v": method}, fill_values={"v": fill})
+def _run(ds, method, fill=None, steps=(-10.0, 10.0)):
+    return downsample(
+        ds, x_dim=X, y_dim=Y, methods={"v": method}, fill_values={"v": fill}, steps=steps
+    )
 
 
 def _ref(a, method, fill):
@@ -318,3 +320,24 @@ def test_multi_var_after_detect(multi_var):
     m = out.mask.values
     assert m[0, 0] in (0, 1, 2)  # fill (-1) at [0,0] ignored in the vote
     assert out.melt.dtype == np.dtype("float32")
+
+
+def test_single_pixel_axis_uses_given_steps():
+    ds = _ds(_rand((1, 1), "float64"), dx=10.0, dy=-10.0, x0=105.0, y0=995.0)
+    out = downsample(
+        ds, x_dim=X, y_dim=Y, methods={"v": "mean"}, fill_values={"v": np.nan}, steps=(-10.0, 10.0)
+    )
+    np.testing.assert_allclose(out.x.values, [110.0])
+    np.testing.assert_allclose(out.y.values, [990.0])
+
+
+def test_single_pixel_axis_without_step_or_res_raises():
+    ds = _ds(_rand((1, 4), "float64"))
+    with pytest.raises(ValueError, match="single-pixel axis 'y'"):
+        downsample(ds, x_dim=X, y_dim=Y, methods={"v": "mean"}, fill_values={"v": np.nan})
+
+
+def test_explicit_steps_override_inferred():
+    ds = _ds(_rand((4, 4), "float64"))
+    out = _run(ds, "mean", np.nan, steps=(-20.0, 20.0))
+    np.testing.assert_allclose(out.x.values, 105.0 - 10 + (2 * np.arange(2) + 1) * 20.0)

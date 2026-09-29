@@ -55,7 +55,7 @@ def _resolve_store(store: Any, storage_options: Mapping[str, Any] | None = None)
         try:
             import obstore.store
         except ImportError:
-            logger.debug("obstore not installed; falling back to fsspec for {}", scheme)
+            logger.debug("obstore is not installed; falling back to fsspec for {}", scheme)
         else:
             logger.debug("Using obstore for {}", store)
             return zarr.storage.ObjectStore(
@@ -148,15 +148,15 @@ def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -
     ds = _prepare(ds, level.chunks, fills)
     g = plan.grid
     if k > 0:
-        # the plan's transform is authoritative: single-pixel axes cannot infer their step
+        # belt and braces: the resampled coords must match the plan's transform
         ny, nx = level.shape
         a, _, c, _, e, f = level.transform
-        ds = ds.assign_coords(
-            {
-                g.x_dim: (g.x_dim, c + a * (np.arange(nx) + 0.5), ds[g.x_dim].attrs),
-                g.y_dim: (g.y_dim, f + e * (np.arange(ny) + 0.5), ds[g.y_dim].attrs),
-            }
-        )
+        for dim, n, origin, step in ((g.x_dim, nx, c, a), (g.y_dim, ny, f, e)):
+            expected = origin + step * (np.arange(n) + 0.5)
+            if not np.allclose(ds[dim].values, expected, rtol=0, atol=abs(step) * 1e-6):
+                raise RuntimeError(
+                    f"Level {k} coordinate {dim!r} does not match the plan transform"
+                )
     ds = cf_prepare(ds, g.crs, level.transform, g.x_dim, g.y_dim, plan.resampling)
     enc = _encoding(ds, level.chunks, fills, compression_level)
     ds.to_zarr(
@@ -178,8 +178,12 @@ def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -
             )
 
 
-def _fmt_mib(n: int) -> str:
-    return f"{n / 1024**2:.1f} MiB"
+def _fmt_size(n: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or unit == "GiB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    raise AssertionError  # pragma: no cover
 
 
 # --------------------------------------------------------------------------- public
@@ -213,7 +217,7 @@ def to_pyramid(
     )
     total = sum(lv.nbytes for lv in plan.levels)
     logger.info(
-        "Pyramid plan: {} level(s), {} uncompressed in total", len(plan.levels), _fmt_mib(total)
+        "Pyramid plan: {} level(s), {} uncompressed in total", len(plan.levels), _fmt_size(total)
     )
     logger.debug("Pyramid plan:\n{}", plan)
 
@@ -223,16 +227,16 @@ def to_pyramid(
         if not overwrite:
             raise FileExistsError(
                 f"{store!r} already contains a zarr group or array; "
-                "pass overwrite=True to replace it."
+                "pass overwrite=True to replace it"
             )
-        logger.warning("Overwriting existing zarr data in {!r}", store)
+        logger.warning("Overwriting existing zarr data in {}", store)
         zarr.open_group(zstore, mode="w")
 
     if not any(v.chunks is not None for v in ds.data_vars.values()):
-        logger.info("Input is not dask-backed; chunking it to the level-0 plan.")
+        logger.debug("Input is not dask-backed; chunking it to the level-0 plan")
 
     if preview:
-        logger.warning("preview lands in M5; ignoring preview=True")
+        logger.warning("Preview is not implemented yet (M5); ignoring preview=True")
 
     timings: dict[str, float] = {}
     variables = [v.name for v in grid.variables]
@@ -242,10 +246,10 @@ def to_pyramid(
     _write_level(ds, zstore, plan, 0, compression_level)
     timings["level_0"] = time.perf_counter() - t0
     logger.info(
-        "Level 0 written: shape={} in {:.1f}s ({})",
+        "Level 0 written: shape={} in {:.1f} s ({} uncompressed)",
         plan.levels[0].shape,
         timings["level_0"],
-        _fmt_mib(plan.levels[0].nbytes),
+        _fmt_size(plan.levels[0].nbytes),
     )
 
     for k in range(len(plan.levels) - 1):
@@ -270,15 +274,16 @@ def to_pyramid(
             y_dim=grid.y_dim,
             methods=plan.resampling,
             fill_values=fills,
+            steps=(plan.levels[k].transform[4], plan.levels[k].transform[0]),
         )
         _write_level(coarse, zstore, plan, k + 1, compression_level)
         timings[f"level_{k + 1}"] = time.perf_counter() - t0
         logger.info(
-            "Level {} written: shape={} in {:.1f}s ({})",
+            "Level {} written: shape={} in {:.1f} s ({} uncompressed)",
             k + 1,
             plan.levels[k + 1].shape,
             timings[f"level_{k + 1}"],
-            _fmt_mib(plan.levels[k + 1].nbytes),
+            _fmt_size(plan.levels[k + 1].nbytes),
         )
 
     zarr.open_group(zstore, mode="r+").attrs.update(root_attrs(plan, ds_attrs))  # before D-19
@@ -295,15 +300,15 @@ def to_pyramid(
         report = _validate(zstore, plan=plan, storage_options=storage_options)
         errors = [f"{k}: {e}" for k, errs in report.items() for e in errs]
         if errors:
-            logger.error("validation failed with {} error(s):\n{}", len(errors), "\n".join(errors))
-        else:
-            logger.info("validation passed")
+            # validate() already logged the one-line result; add the details here
+            logger.error("Validation problems:\n{}", "\n".join(errors))
     timings["total"] = time.perf_counter() - t_start
-    logger.info("Pyramid written in {:.1f}s", timings["total"])
+    result_store = (
+        store if isinstance(store, str) else (str(store) if isinstance(store, Path) else zstore)
+    )
+    logger.info("Pyramid written to {} in {:.1f} s", result_store, timings["total"])
     return PyramidResult(
-        store=store
-        if isinstance(store, str)
-        else (str(store) if isinstance(store, Path) else zstore),
+        store=result_store,
         plan=plan,
         validation=report,
         timings=timings,

@@ -65,6 +65,9 @@ def test_conventions_uuids_and_urls(polar_3031, tmp_path):
     assert urls["multiscales"].endswith("zarr-conventions/multiscales/refs/tags/v0.1/schema.json")
     assert urls["spatial:"].endswith("zarr-conventions/spatial/refs/tags/v0.1/schema.json")
     assert urls["proj:"].endswith("zarr-conventions/proj/refs/tags/v0.1/schema.json")
+    specs = {c["name"]: c["spec_url"] for c in conv}
+    for name, repo in (("multiscales", "multiscales"), ("spatial:", "spatial"), ("proj:", "proj")):
+        assert specs[name] == f"https://github.com/zarr-conventions/{repo}/blob/v0.1/README.md"
     lvl = _root(path)["1"].attrs["zarr_conventions"]
     assert {c["name"] for c in lvl} == {"spatial:", "proj:"}
 

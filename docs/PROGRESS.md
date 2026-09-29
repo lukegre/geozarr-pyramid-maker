@@ -1,7 +1,7 @@
 # Progress log — geozarr-pyramid-maker
 
 ## Status
-- Phase: M1 done — M2 in progress
+- Phase: M3 done — M4 in progress
 - Last updated: 2026-09-29
 
 ## Log
@@ -23,17 +23,21 @@
 | 2026-09-29 | M1 detect.py + conftest fixtures (sonnet) | done | all §6 fixtures; lazy; lon roll/antimeridian gap, y flip, fill masking; grid_mapping stripped (re-added in M3) |
 | 2026-09-29 | M1 fix: float32 coord regularity/transform (sonnet) | done | least-squares step; tolerance max(1e-6·step, 8·eps·max\|v\|) |
 | 2026-09-29 | M1 plan.py + .geozarr.plan() accessor (sonnet) | done | 241 tests green on py3.12 + 3.14; merged to main (041278f) |
-| 2026-09-29 | M2 resample.py + write.py (sonnet ×2, parallel) | in progress | branch feat/m2-resample-write |
+| 2026-09-29 | M2 resample.py + write.py (sonnet ×2, parallel) | done | merged to main (a9cf61e); 452 tests; notebook-sized 650 MiB test pyramid: 5 levels in 2.7 s, peak RSS 1.6 GiB (to revisit) |
+| 2026-09-29 | M3 metadata.py + write wiring (sonnet) | done | geozarr-toolkit helpers; D-16 schema URLs; CF spatial_ref/grid_mapping/GeoTransform; root history; consolidate after attrs; overwrite refuses non-Zarr dirs |
+| 2026-09-29 | M3 validate.py (sonnet) | done | toolkit validate_group per group + required-conventions check (toolkit silently skips absent ones) + structure/plan/datatree checks |
+| 2026-09-29 | M3 merged | done | 503 passed, 1 skipped (GDAL 3.12.4 < 3.13, Zarr-driver test skipped); main 3cdde34 |
+| 2026-09-29 | M4 CLI + logging polish/fixes (sonnet ×2, parallel) | in progress | branch feat/m4-logging-cli; fixes: duplicate validation log, D-16 spec_url, resample 1-px step, rioxarray warning filter |
 
 ## Next step (for the next agent)
-Finish **M2** (resample + write, data only), merge feat/m2-resample-write, then **M3** metadata + validation.
+Finish M4 (CLI + log review), merge feat/m4-logging-cli, then M5 preview.
 
 ## Milestones
 
 - [x] M0 Scaffold
 - [x] M1 Detect+plan+chunking
-- [ ] M2 Resample+write
-- [ ] M3 Metadata+validation
+- [x] M2 Resample+write
+- [x] M3 Metadata+validation
 - [ ] M4 Logging+CLI
 - [ ] M5 Preview
 - [ ] M6 Docs+reference test

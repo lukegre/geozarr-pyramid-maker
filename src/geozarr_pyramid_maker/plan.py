@@ -84,9 +84,9 @@ def resolve_resampling(
         elif v.categorical and method in _ROUNDING_METHODS:
             logger.warning(
                 f"Variable {v.name!r} is categorical/integer ({v.dtype}); resampling={method!r} "
-                "will round or cast values back to that dtype. Consider 'mode' or 'nearest'."
+                "will round or cast values back to that dtype (consider 'mode' or 'nearest')"
             )
-        logger.debug(f"resampling for {v.name!r}: {method}")
+        logger.debug(f"Resampling for {v.name!r}: {method}")
         out[v.name] = method
     return out
 

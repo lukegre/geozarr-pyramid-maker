@@ -43,6 +43,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+filterwarnings = [
+    # rioxarray internals (Affine * Affine); not ours to fix
+    "ignore:Use `@` matmul instead of `\\*` mul operator:PendingDeprecationWarning",
+]
 markers = [
     "slow: long-running tests",
     "network: tests that need network access",

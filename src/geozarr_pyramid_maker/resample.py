@@ -23,15 +23,26 @@ def metadata_method_name(method: str) -> str:
     return "average" if method == "mean" else method
 
 
-def _new_coord(coord: xr.DataArray, *, descending: bool) -> xr.Variable:
-    """Block-centre coordinate for the halved axis (float64), including the padded edge."""
+def _new_coord(coord: xr.DataArray, *, descending: bool, step: float | None = None) -> xr.Variable:
+    """Block-centre coordinate for the halved axis (float64), including the padded edge.
+
+    ``step`` is the signed input pixel step. Without it the step is inferred from the coordinate
+    values, or from a ``res`` attr for a single-pixel axis; otherwise ``ValueError``.
+    """
     v = np.asarray(coord.values, dtype="float64")
     n = v.size
-    if n > 1:
+    if step is not None:
+        step = float(step)
+    elif n > 1:
         step = _grid_step(v)
     else:
         res = coord.attrs.get("res")
-        step = abs(float(np.asarray(res).ravel()[0])) if res is not None else 0.0
+        if res is None:
+            raise ValueError(
+                f"Cannot infer the pixel step of single-pixel axis {coord.name!r} (no 'res' "
+                "attr); pass steps=(dy, dx)"
+            )
+        step = abs(float(np.asarray(res).ravel()[0]))
         step = -step if descending else step  # single pixel: y is north-up (descending)
     m = -(-n // 2)
     new = v[0] - step / 2 + (2 * np.arange(m) + 1) * step
@@ -141,10 +152,15 @@ def downsample(
     y_dim: str,
     methods: Mapping[str, str],
     fill_values: Mapping[str, int | float | None],
+    steps: tuple[float, float] | None = None,
 ) -> xr.Dataset:
     """Halve the spatial resolution: output spatial shape is (ceil(ny/2), ceil(nx/2)).
 
     Odd edges are padded, never trimmed. Lazy; output dtype equals input dtype.
+
+    ``steps`` is ``(dy, dx)``, the signed pixel steps at the input resolution (``dy`` is negative
+    for north-up grids). Needed for single-pixel axes without a ``res`` attr, which raise
+    ``ValueError`` otherwise.
     """
     spatial = {x_dim, y_dim}
     names = [n for n, v in ds.data_vars.items() if spatial <= set(v.dims)]
@@ -156,7 +172,9 @@ def downsample(
                 f"Unknown resampling method {methods[n]!r} for {n!r}; choose from {METHODS}"
             )
 
-    new_x, new_y = _new_coord(ds[x_dim], descending=False), _new_coord(ds[y_dim], descending=True)
+    dy, dx = steps if steps is not None else (None, None)
+    new_x = _new_coord(ds[x_dim], descending=False, step=dx)
+    new_y = _new_coord(ds[y_dim], descending=True, step=dy)
     coords: dict[str, xr.Variable] = {}
     for name, c in ds.coords.items():
         if name == x_dim:
@@ -175,7 +193,7 @@ def downsample(
         var = var.transpose(..., y_dim, x_dim)
         data = var.data if isinstance(var.data, da.Array) else da.from_array(var.data)
         logger.trace(
-            f"downsample {name!r}: method={method} shape={data.shape} chunks={data.chunks}"
+            f"Downsample {name!r}: method={method} shape={data.shape} chunks={data.chunks}"
         )
         if method == "nearest":
             res = data[..., ::2, ::2]
