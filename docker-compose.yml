@@ -4,7 +4,8 @@
 services:
   viewer:
     build: .
-    image: ghcr.io/lukegre/geozarr-viewer:latest
+    platform: linux/amd64  # RenkuLab runs amd64; forces emulation on Apple Silicon
+    image: lukegre/geozarr-viewer:latest
     ports:
       - "127.0.0.1:${GEOZARR_VIEWER_PORT:-8888}:8888"
     volumes:
