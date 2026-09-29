@@ -23,6 +23,8 @@ import xarray as xr
 import zarr
 from loguru import logger
 
+from .metadata import VARIABLES_ATTR
+
 OL_VERSION = "10.10.0"
 PROJ4_VERSION = "2.22.0"
 SYNTHETIC_CRS = "GPM:custom"
@@ -101,6 +103,8 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
     index = tuple(0 if d in extra else slice(None) for d in dims)
     data = np.asarray(arr[index])
     finite = np.isfinite(data) if data.dtype.kind == "f" else np.ones(data.shape, bool)
+    # D-20: only the effective fill (NaN, a declared fill or the int sentinel) is nodata;
+    # 0 stays a valid class. (Zarr bool has no sentinel: its False fill is hidden too.)
     fill = arr.fill_value
     try:
         if fill is not None and not (isinstance(fill, float) and np.isnan(fill)):
@@ -154,7 +158,12 @@ def read_config(store: str | os.PathLike) -> dict[str, Any]:
     sdims = list(dict(group.attrs).get("spatial:dimensions") or [])
     variables, dims = [], {}
     ds = xr.open_zarr(zstore, group=coarsest, consolidated=False)
-    for name, arr in group.arrays():
+    order = [str(n) for n in attrs.get(VARIABLES_ATTR) or []]
+    # zarr lists arrays alphabetically; keep the source order (unknown names go last)
+    arrays = sorted(
+        group.arrays(), key=lambda kv: order.index(kv[0]) if kv[0] in order else len(order)
+    )
+    for name, arr in arrays:
         dn = list(arr.metadata.dimension_names or ())
         if not sdims or not all(d in dn for d in sdims):
             continue

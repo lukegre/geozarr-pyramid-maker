@@ -130,7 +130,7 @@ function makeLayer() {
     source, style: {color: colorExpr(v)}, opacity: +$('opacity').value})};
 }
 
-async function init() {
+function init() {
   const first = cfg.variables[0];
   for (const v of cfg.variables) $('var').add(new Option(v.name, v.name));
   $('osm').checked = cfg.basemap_default;
@@ -139,8 +139,10 @@ async function init() {
   buildLegend(first);
   const {source, layer} = makeLayer();
   state.source = source; state.layer = layer;
-  const view = await getView(source, withLowerResolutions(1), withHigherResolutions(2),
+  // Pass the promise itself: Map's `view` option accepts Promise<ViewOptions> and resolves it.
+  const view = getView(source, withLowerResolutions(1), withHigherResolutions(2),
     withExtentCenter(), withZoom(2));
+  view.catch(showError);
   const osm = new TileLayer({source: new OSM(), visible: $('osm').checked});
   state.map = new Map({target: 'map', layers: [osm, layer], view});
   $('osm').addEventListener('change', () => osm.setVisible($('osm').checked));
@@ -155,7 +157,7 @@ async function init() {
     state.layer = next.layer; state.source = next.source;
   });
 }
-init().catch(showError);
+try { init(); } catch (e) { showError(e); }
 </script>
 </body>
 </html>

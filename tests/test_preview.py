@@ -141,6 +141,13 @@ def test_template_is_a_package_resource():
         assert token in text
 
 
+def test_view_promise_not_awaited(tiny, tmp_path):
+    # Map's `view` option takes Promise<ViewOptions>; awaiting it hands Map a plain object.
+    _, _, html = _generate(tiny, tmp_path)
+    assert "await getView" not in html
+    assert "getView(source" in html
+
+
 def test_missing_store(tmp_path):
     with pytest.raises(FileNotFoundError):
         gpm.preview(tmp_path / "nope.zarr")

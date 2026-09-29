@@ -21,3 +21,6 @@ htmlcov/
 .coverage
 *.zarr/
 htmlcov/
+
+# preview pages generated next to stores
+*.preview.html

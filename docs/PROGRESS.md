@@ -1,7 +1,7 @@
 # Progress log — geozarr-pyramid-maker
 
 ## Status
-- Phase: M3 done — M4 in progress
+- Phase: M5 in review (browser check) — M6 next
 - Last updated: 2026-09-29
 
 ## Log
@@ -27,10 +27,14 @@
 | 2026-09-29 | M3 metadata.py + write wiring (sonnet) | done | geozarr-toolkit helpers; D-16 schema URLs; CF spatial_ref/grid_mapping/GeoTransform; root history; consolidate after attrs; overwrite refuses non-Zarr dirs |
 | 2026-09-29 | M3 validate.py (sonnet) | done | toolkit validate_group per group + required-conventions check (toolkit silently skips absent ones) + structure/plan/datatree checks |
 | 2026-09-29 | M3 merged | done | 503 passed, 1 skipped (GDAL 3.12.4 < 3.13, Zarr-driver test skipped); main 3cdde34 |
-| 2026-09-29 | M4 CLI + logging polish/fixes (sonnet ×2, parallel) | in progress | branch feat/m4-logging-cli; fixes: duplicate validation log, D-16 spec_url, resample 1-px step, rioxarray warning filter |
+| 2026-09-29 | M4 CLI + logging polish/fixes (sonnet ×2, parallel) | done | CLI convert/plan/validate; log review; main 947039f |
+| 2026-09-29 | M5 preview + server (sonnet) | done | OL 10.10.0 via jsDelivr +esm; Range/CORS server; facts verified against OL source (docs/research/03) |
+| 2026-09-29 | M5 bug: preview blank (`await getView`) | fixed | found via headless Chrome console; Map needs the Promise |
+| 2026-09-29 | D-20 int sentinel fill (user decision) + preview var order | in progress | int zeros were hidden in viewers |
+| 2026-09-29 | M6 reference dataset changed by user | done | OceanSODA dfco2 (Zarr v3) instead of basal melt |
 
 ## Next step (for the next agent)
-Finish M4 (CLI + log review), merge feat/m4-logging-cli, then M5 preview.
+Finish D-20, user browser check of demo_polar preview, merge M5, then M6 (README, example, reference test on dfco2).
 
 ## Milestones
 
@@ -38,6 +42,6 @@ Finish M4 (CLI + log review), merge feat/m4-logging-cli, then M5 preview.
 - [x] M1 Detect+plan+chunking
 - [x] M2 Resample+write
 - [x] M3 Metadata+validation
-- [ ] M4 Logging+CLI
+- [x] M4 Logging+CLI
 - [ ] M5 Preview
 - [ ] M6 Docs+reference test

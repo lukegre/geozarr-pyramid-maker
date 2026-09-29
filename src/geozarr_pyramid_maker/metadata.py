@@ -48,7 +48,8 @@ PROJ_SPEC_URL = "https://github.com/zarr-conventions/proj/blob/v0.1/README.md"
 GRID_MAPPING_NAME = "spatial_ref"
 _CODE_RE = re.compile(r"^[A-Z]+:[0-9]+$")
 _MANAGED_PREFIXES = ("spatial:", "proj:")
-_MANAGED_KEYS = ("multiscales", "zarr_conventions")
+VARIABLES_ATTR = "geozarr_pyramid_maker:variables"  # source variable order (zarr sorts arrays)
+_MANAGED_KEYS = ("multiscales", "zarr_conventions", VARIABLES_ATTR)
 
 
 def convention_metadata() -> tuple[
@@ -158,6 +159,7 @@ def root_attrs(plan: PyramidPlan, source_attrs: Mapping[str, Any] | None = None)
     attrs.update(spatial)
     attrs.update(proj_attrs(plan.grid.crs))
     attrs["zarr_conventions"] = _conventions("multiscales", "spatial", "proj")
+    attrs[VARIABLES_ATTR] = [v.name for v in plan.grid.variables]
     return attrs
 
 

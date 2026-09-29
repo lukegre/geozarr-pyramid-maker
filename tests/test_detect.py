@@ -138,7 +138,7 @@ def test_multi_var(multi_var, log_records):
     assert "spatial_ref" not in dropped
 
 
-def test_int_without_fill_is_none_and_flags_categorical():
+def test_int_without_declared_fill_and_flags_categorical():
     ny, nx = 4, 5
     ds = xr.Dataset(
         {
@@ -154,7 +154,7 @@ def test_int_without_fill_is_none_and_flags_categorical():
     )
     _, info = detect(ds, crs="EPSG:32633")
     by = {v.name: v for v in info.variables}
-    assert by["cls"].categorical and by["cls"].fill_value is None
+    assert by["cls"].categorical and not by["cls"].fill_declared
     assert by["flagged"].categorical
     assert not by["flt"].categorical and np.isnan(by["flt"].fill_value)
 

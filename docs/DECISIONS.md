@@ -56,7 +56,7 @@ go to the top-left pixel and fill values are ignored. This is cheap enough that 
 
 ## D-15 — Project housekeeping · accepted 2026-09-29
 MIT license. Personal GitHub with Actions CI (py3.12–3.14); PyPI via trusted publishing after v0.1 is stable.
-Docs for v0.1 are the README plus `examples/`, with no docs site yet. The M6 reference test uses the notebook's basal-melt data (marked `slow`/`network`).
+Docs for v0.1 are the README plus `examples/`, with no docs site yet. The M6 reference test uses the OceanSODA-ETHZ-HR ΔfCO₂ store `https://s3.waw4-1.cloudferro.com/EarthCODE/OSCAssets/ocean-soda/dfco2.zarr/` (Zarr v3, 0.25° global, weekly 1982–, float32 NaN fill; marked `slow`/`network`) — changed from the notebook's basal-melt data by the user on 2026-09-29.
 
 ## D-16 — Override geozarr-toolkit's convention `schema_url`s · accepted 2026-09-29
 toolkit 0.1.2 embeds `.../refs/tags/v1/schema.json` URLs that return 404, so we write the upstream `refs/tags/v0.1` URLs instead (and `zarr-conventions/proj` for proj:). The UUIDs are unchanged. **Why:** clients key on the UUID, but working URLs matter for humans and validators; revisit when the toolkit fixes them.
@@ -69,3 +69,7 @@ the user-facing option stays `resampling="mean"`, but `"average"` is written in 
 
 ## D-19 — Consolidate metadata explicitly · accepted 2026-09-29
 call `zarr.consolidate_metadata` at the end instead of `to_zarr(consolidated=True)`, and suppress only the `ZarrUserWarning` about consolidated metadata not being in the v3 spec. **Why:** refines D-07 without noisy warnings for users.
+
+## D-20 — Integer fill values: 0 stays visible, NaNs explicitly hidden · accepted 2026-09-29
+Zarr v3 needs a `fill_value` on every array, and viewers (e.g. OpenLayers GeoZarr) treat it as nodata. Floats: NaN is the fill and the only hidden value. Ints with a declared `_FillValue`/`missing_value`/nodata keep it. Ints with none get a sentinel on-disk `fill_value`: dtype min (signed) / max (unsigned), or the other end if the sentinel is in CF `flag_values`. No CF `_FillValue` attr is written for the sentinel, so xarray reads the ints unmasked. Padding and antimeridian gaps use the sentinel. Bool without a fill keeps `False` (limitation).
+**Why:** the zarr default of 0 made valid zeros (e.g. an ocean class in a mask) transparent in viewers.

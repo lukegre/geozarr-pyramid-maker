@@ -110,7 +110,7 @@ Because odd edges are padded rather than trimmed (§4.3), the origin never moves
 | Orientation | y ascending → flipped to north-up (descending), logged | — |
 | Longitude 0–360 | EPSG:4326, global span: roll to −180…180 (logged) | Regional data crossing 180° is also rolled (split grid), with a WARNING ([D-11](DECISIONS.md#d-11)) |
 | Variables | data_vars with **both** spatial dims; the others are dropped with a warning listing them | Vars on a different grid: raise |
-| Fill value | `_FillValue`, `missing_value`, `rio.nodata` → floats: masked to NaN and written with NaN fill; ints: fill kept | — |
+| Fill value | `_FillValue`, `missing_value`, `rio.nodata` → floats: masked to NaN and written with NaN fill; ints: fill kept; ints without a fill get a sentinel ([D-20](DECISIONS.md#d-20)) | — |
 
 ### 4.2 Plan (`plan.py`), a pure function that is fully unit-testable without writing
 `PyramidPlan` is a frozen dataclass: CRS, dims, per-variable resampling, and a list of `LevelPlan`s
@@ -209,9 +209,9 @@ geozarr-pyramid-maker/
 │   ├── conftest.py           synthetic dataset factories (see §6)
 │   ├── test_detect.py  test_plan.py  test_chunking.py  test_resample.py
 │   ├── test_metadata.py  test_write.py (round-trip + validation)  test_cli.py
-│   └── test_reference.py     reproduces the notebook's basal-melt output (marked slow/network)
+│   └── test_reference.py     reference test against the OceanSODA dfco2 store (marked slow/network)
 └── examples/
-    └── polar_basal_melt.py
+    └── oceansoda_dfco2.py
 ```
 
 **Dependencies** (initial lower bounds, to be confirmed in M0): `xarray>=2026.2.0`, `zarr>=3.1`, `dask[array]>=2025.1`,
@@ -249,7 +249,7 @@ validation passes; `xr.open_datatree` round-trips; `rioxarray` reads the CRS at 
 | M3 | `metadata.py` + `validate.py` | geozarr-toolkit validation passes for every fixture |
 | M4 | Logging polish + CLI | CLI tests; log output reviewed |
 | M5 | Preview HTML + server | Manual check of the notebook dataset in a browser |
-| M6 | README, example, reference test against the notebook data | Output matches the notebook (within padding differences) |
+| M6 | README, example, reference test against the OceanSODA dfco2 store | Reference test passes (values match an independent NumPy coarsen; validation passes) |
 
 TDD throughout: tests are written first for each module.
 

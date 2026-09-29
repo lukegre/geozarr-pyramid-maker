@@ -9,6 +9,7 @@ Nothing here computes dask data variables; only coordinate values are read.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,7 +42,9 @@ class VarInfo:
     dims: tuple[str, ...]  # non-spatial dims first, then (y, x)
     shape: tuple[int, ...]
     categorical: bool  # int/bool dtype, or CF flag_values/flag_meanings attrs (D-14)
-    fill_value: int | float | None  # ints: original fill; floats: NaN; None if no int fill
+    # effective on-disk fill (D-20): floats NaN; ints the declared fill or a sentinel; bool False
+    fill_value: int | float | bool | None = None
+    fill_declared: bool = False  # True if the input declared a _FillValue/missing_value/nodata
 
 
 @dataclass(frozen=True)
@@ -206,9 +209,45 @@ def _single_pixel_res(ds: xr.Dataset, xn: str, yn: str) -> tuple[float, float]:
     return rx, ry
 
 
-def _int_fill_for(dtype: np.dtype) -> int:
+def _sentinel_fill(dtype: np.dtype, attrs: Mapping[str, Any], name: str) -> int:
+    """Sentinel fill for an int variable without a declared fill (D-20).
+
+    Signed ints use the dtype minimum, unsigned ints the maximum. If that value is a CF class in
+    ``flag_values`` the other end of the range is used; if both are, an explicit ``_FillValue``
+    is required.
+    """
     info = np.iinfo(dtype)
-    return int(info.min if dtype.kind == "i" else info.max)
+    first, other = (info.min, info.max) if dtype.kind == "i" else (info.max, info.min)
+    flags = attrs.get("flag_values")
+    used = {int(f) for f in np.atleast_1d(flags).tolist()} if flags is not None else set()
+    if int(first) not in used:
+        return int(first)
+    if int(other) not in used:
+        return int(other)
+    raise DetectionError(
+        f"Variable {name!r} has no _FillValue and its flag_values use both ends of the {dtype} "
+        f"range ({int(info.min)} and {int(info.max)}), so no sentinel is free. Set an explicit "
+        "_FillValue attribute."
+    )
+
+
+def effective_fill(
+    dtype: np.dtype, attrs: Mapping[str, Any], declared: Any, name: str = "?"
+) -> tuple[int | float | bool, bool]:
+    """``(fill, declared?)`` written as the zarr ``fill_value`` and hidden by viewers (D-20).
+
+    Floats: NaN. Ints: the declared fill, else a sentinel (dtype min/max, see ``_sentinel_fill``).
+    Bool: always False; Zarr bool cannot carry a sentinel, so a bool variable without a real
+    mask cannot distinguish nodata from False (documented limitation).
+    """
+    dtype = np.dtype(dtype)
+    if dtype.kind == "f":
+        return float("nan"), declared is not None
+    if dtype.kind == "b":
+        return False, False
+    if declared is not None:
+        return int(declared), True
+    return _sentinel_fill(dtype, attrs, name), False
 
 
 # ---------------------------------------------------------------------------- longitude
@@ -257,7 +296,6 @@ def _wrap_longitude(
     if n_full == xs.size:
         return ds, fills
 
-    fills = dict(fills)
     fill_map: dict[str, Any] = {}
     for name, v in ds.data_vars.items():
         if v.dtype.kind == "f":
@@ -267,10 +305,10 @@ def _wrap_longitude(
         else:
             fv = fills.get(name)
             if fv is None:
-                fv = _int_fill_for(v.dtype)
-                fills[name] = fv
+                fv = _sentinel_fill(v.dtype, v.attrs, name)
                 logger.warning(
-                    f"Variable {name!r} has no fill value; using {fv} for the antimeridian gap"
+                    f"Variable {name!r} has no fill value; using sentinel {fv} for the "
+                    "antimeridian gap"
                 )
             fill_map[name] = fv
     logger.warning(
@@ -359,16 +397,11 @@ def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, 
         fill = fills.get(name)
         attrs = {k: val for k, val in v.attrs.items() if k not in (*_FILL_KEYS, "grid_mapping")}
         enc = {k: val for k, val in v.encoding.items() if k not in (*_FILL_KEYS, "grid_mapping")}
-        rec_fill: int | float | None
-        if v.dtype.kind == "f":
-            if fill is not None and not np.isnan(fill):
-                v = v.where(v != fill)
-            rec_fill = float("nan")
-        elif v.dtype.kind in "iu" and fill is not None:
-            rec_fill = int(fill)
-            attrs["_FillValue"] = rec_fill
-        else:
-            rec_fill = None
+        if v.dtype.kind == "f" and fill is not None and not np.isnan(fill):
+            v = v.where(v != fill)
+        rec_fill, declared = effective_fill(v.dtype, v.attrs, fill, str(name))
+        if v.dtype.kind in "iu" and declared:
+            attrs["_FillValue"] = rec_fill  # sentinels are never written as a CF _FillValue
         order = [d for d in v.dims if d not in spatial] + list(spatial)
         v = v.transpose(*order)
         v.attrs = attrs
@@ -386,6 +419,7 @@ def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, 
                 shape=tuple(int(s) for s in v.shape),
                 categorical=categorical,
                 fill_value=rec_fill,
+                fill_declared=declared,
             )
         )
         logger.debug(
