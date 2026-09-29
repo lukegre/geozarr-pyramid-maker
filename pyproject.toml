@@ -36,13 +36,14 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers"
+addopts = "--strict-markers -m \"not slow and not network\""
 filterwarnings = [
     # rioxarray internals (Affine * Affine); not ours to fix
     "ignore:Use `@` matmul instead of `\\*` mul operator:PendingDeprecationWarning",

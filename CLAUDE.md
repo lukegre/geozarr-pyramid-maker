@@ -48,4 +48,5 @@ and the target tests, plus the rule: TDD (red → green), and run `.venv/bin/pyt
 - Logging: **loguru**; the library never adds or removes handlers (D-08). INFO for milestones, DEBUG for the plan, TRACE for internals, WARNING for auto-corrections.
 - All processing is lazy with dask
 - Metadata is built with `geozarr-toolkit` helpers, not handwritten dicts.
+- Tests marked `slow`/`network` are excluded by default (`addopts -m "not slow and not network"`); run them with `uv run pytest -m "slow or network"`.
 - ISO-8601 dates; metric units.

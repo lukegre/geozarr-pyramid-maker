@@ -1,7 +1,7 @@
 # Progress log — geozarr-pyramid-maker
 
 ## Status
-- Phase: M5 in review (browser check) — M6 next
+- Phase: v0.1 feature-complete (M0–M6 done)
 - Last updated: 2026-09-29
 
 ## Log
@@ -30,11 +30,16 @@
 | 2026-09-29 | M4 CLI + logging polish/fixes (sonnet ×2, parallel) | done | CLI convert/plan/validate; log review; main 947039f |
 | 2026-09-29 | M5 preview + server (sonnet) | done | OL 10.10.0 via jsDelivr +esm; Range/CORS server; facts verified against OL source (docs/research/03) |
 | 2026-09-29 | M5 bug: preview blank (`await getView`) | fixed | found via headless Chrome console; Map needs the Promise |
-| 2026-09-29 | D-20 int sentinel fill (user decision) + preview var order | in progress | int zeros were hidden in viewers |
+| 2026-09-29 | D-20 int sentinel fill (user decision) + preview var order | done | tests/test_fill.py was missing at first and then written: 14 tests |
 | 2026-09-29 | M6 reference dataset changed by user | done | OceanSODA dfco2 (Zarr v3) instead of basal melt |
+| 2026-09-29 | M5 merged | done | headless-Chrome checks (demo_polar: melt/mask render, no JS errors); main 8d975f8 |
+| 2026-09-29 | M6 README, examples/oceansoda_dfco2.py, examples/demo.ipynb (sonnet) | done | notebook: 11 cells, runs start to finish on 12 time steps (user request) |
+| 2026-09-29 | M6 reference test (dfco2, 12 time steps) + notebook test (sonnet) | done | slow/network, excluded by default; 5/5 pass (run by main session outside sandbox); level1/2 = NumPy 2×2 nanmean of the level above |
+| 2026-09-29 | M6 dfco2 preview in headless Chrome | done | aligns with the OSM basemap; time slider OK |
+| 2026-09-29 | Open follow-ups | open | peak RSS about 1.6 GiB on the 650 MiB test (threads × shard size); OL per-level resolution vs padding (research/03); GDAL 3.13 Zarr-driver test untested (bundled GDAL 3.12.4); CI not yet run on GitHub; pre-commit-hooks rev v5.0.0; no push/PyPI yet |
 
 ## Next step (for the next agent)
-Finish D-20, user browser check of demo_polar preview, merge M5, then M6 (README, example, reference test on dfco2).
+Push to GitHub and check CI (py3.12–3.14); user browser check of the preview; decide on the follow-ups above; then tag v0.1.0.
 
 ## Milestones
 
@@ -43,5 +48,5 @@ Finish D-20, user browser check of demo_polar preview, merge M5, then M6 (README
 - [x] M2 Resample+write
 - [x] M3 Metadata+validation
 - [x] M4 Logging+CLI
-- [ ] M5 Preview
-- [ ] M6 Docs+reference test
+- [x] M5 Preview
+- [x] M6 Docs+reference test
