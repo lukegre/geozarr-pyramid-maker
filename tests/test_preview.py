@@ -497,3 +497,8 @@ def test_template_legend_ticks_and_default_not_reversed(tiny, tmp_path):
     assert "reversed: false" in html  # never reversed by default
     assert "last && units" not in html  # units live in the card's metadata line only
     assert "function layoutTicks" in html
+
+
+def test_template_reversed_resets_on_colormap_change(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html
