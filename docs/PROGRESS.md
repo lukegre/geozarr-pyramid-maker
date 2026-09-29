@@ -1,7 +1,7 @@
 # Progress log — geozarr-pyramid-maker
 
 ## Status
-- Phase: M0 done — next M1
+- Phase: M1 done — M2 in progress
 - Last updated: 2026-09-29
 
 ## Log
@@ -18,14 +18,20 @@
 | 2026-09-29 | M0 blocker: uv panics inside the macOS sandbox | worked around | `excludedCommands` "uv *" not effective; main session runs uv unsandboxed, subagents use `.venv/bin/{pytest,ruff}` |
 | 2026-09-29 | D-16..D-19 accepted by user | done | |
 | 2026-09-29 | M0 scaffold (sonnet) | done | pyproject, CLI stub, logging, smoke tests, pre-commit, CI, LICENSE |
+| 2026-09-29 | CLAUDE.md: uv sandbox workaround documented | done | main session runs uv unsandboxed; subagents use .venv/bin/{python -m pytest,ruff} |
+| 2026-09-29 | M1 chunking.py (sonnet) | done | PLAN §4.4 rules; float64 at 512 px → k=8 (128 MiB, rule is ≤) |
+| 2026-09-29 | M1 detect.py + conftest fixtures (sonnet) | done | all §6 fixtures; lazy; lon roll/antimeridian gap, y flip, fill masking; grid_mapping stripped (re-added in M3) |
+| 2026-09-29 | M1 fix: float32 coord regularity/transform (sonnet) | done | least-squares step; tolerance max(1e-6·step, 8·eps·max\|v\|) |
+| 2026-09-29 | M1 plan.py + .geozarr.plan() accessor (sonnet) | done | 241 tests green on py3.12 + 3.14; merged to main (041278f) |
+| 2026-09-29 | M2 resample.py + write.py (sonnet ×2, parallel) | in progress | branch feat/m2-resample-write |
 
 ## Next step (for the next agent)
-Start **M1** (detect + plan + chunking). Subagents: run `.venv/bin/python -m pytest` and `.venv/bin/ruff`, not `uv` (sandbox).
+Finish **M2** (resample + write, data only), merge feat/m2-resample-write, then **M3** metadata + validation.
 
 ## Milestones
 
 - [x] M0 Scaffold
-- [ ] M1 Detect+plan+chunking
+- [x] M1 Detect+plan+chunking
 - [ ] M2 Resample+write
 - [ ] M3 Metadata+validation
 - [ ] M4 Logging+CLI

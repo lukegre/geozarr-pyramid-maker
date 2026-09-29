@@ -10,6 +10,8 @@ from loguru import logger
 
 from .detect import detect
 from .plan import PyramidPlan, build_plan
+from .write import PyramidResult
+from .write import to_pyramid as _to_pyramid
 
 
 class _GeoZarrAccessor:
@@ -37,8 +39,9 @@ class _GeoZarrAccessor:
         logger.debug("Pyramid plan:\n{}", plan)
         return plan
 
-    def to_pyramid(self, store: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("to_pyramid lands in M2")
+    def to_pyramid(self, store: Any, **kwargs: Any) -> PyramidResult:
+        """Write a GeoZarr multiscale pyramid (see ``write.to_pyramid``)."""
+        return _to_pyramid(self._obj, store, **kwargs)
 
 
 @xr.register_dataset_accessor("geozarr")

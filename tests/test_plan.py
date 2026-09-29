@@ -337,9 +337,18 @@ def test_accessor_no_compute(polar_3031, multi_var, global_4326_0360):
             src.geozarr.plan()
 
 
-def test_to_pyramid_stub(polar_3031):
-    with pytest.raises(NotImplementedError, match="M2"):
-        polar_3031.geozarr.to_pyramid("out.zarr")
+def test_to_pyramid_delegates_to_write(polar_3031, monkeypatch):
+    calls = {}
+
+    def fake(obj, store, **kwargs):
+        calls.update(obj=obj, store=store, kwargs=kwargs)
+        return "result"
+
+    monkeypatch.setattr("geozarr_pyramid_maker.accessor._to_pyramid", fake)
+    assert polar_3031.geozarr.to_pyramid("somewhere.zarr", tile_size=64) == "result"
+    assert calls["obj"] is polar_3031
+    assert calls["store"] == "somewhere.zarr"
+    assert calls["kwargs"] == {"tile_size": 64}
 
 
 def test_public_api():
