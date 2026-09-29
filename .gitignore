@@ -8,3 +8,16 @@ wheels/
 
 # Virtual environments
 .venv
+.env
+
+.pytest_cache/
+.ruff_cache/
+.coverage
+*.zarr/
+htmlcov/
+
+.pytest_cache/
+.ruff_cache/
+.coverage
+*.zarr/
+htmlcov/

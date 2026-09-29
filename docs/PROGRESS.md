@@ -1,7 +1,7 @@
 # Progress log — geozarr-pyramid-maker
 
 ## Status
-- Phase: Planning complete — awaiting go for M0
+- Phase: M0 done — next M1
 - Last updated: 2026-09-29
 
 ## Log
@@ -14,14 +14,17 @@
 | 2026-09-29 | Write PLAN.md + ADRs | done | docs/PLAN.md, docs/DECISIONS.md D-01..D-10 |
 | 2026-09-29 | User review of PLAN.md + open questions Q1–Q4 | done | D-05–D-10 accepted; Q1 roll to −180…180 w/ warning (D-11); Q2 curvilinear out of scope (D-12); Q3 obstore + fsspec fallback (D-13); Q4 mode default (D-14); housekeeping D-15: MIT, personal GitHub + Actions, README+examples, basal-melt ref test |
 | 2026-09-29 | Planning complete — ready for M0 scaffold | done | |
+| 2026-09-29 | M0 verification of APIs (sonnet) | done | research/02 ⚠ items resolved; accessor `geozarr` free; findings led to D-16..D-19 |
+| 2026-09-29 | M0 blocker: uv panics inside the macOS sandbox | worked around | `excludedCommands` "uv *" not effective; main session runs uv unsandboxed, subagents use `.venv/bin/{pytest,ruff}` |
+| 2026-09-29 | D-16..D-19 accepted by user | done | |
+| 2026-09-29 | M0 scaffold (sonnet) | done | pyproject, CLI stub, logging, smoke tests, pre-commit, CI, LICENSE |
 
 ## Next step (for the next agent)
-Start **M0** as described in PLAN §7. Read `CLAUDE.md` first and follow its delegation table: coding goes to Sonnet:medium subagents, and the progress log is updated by Haiku:high.
-Nothing has been implemented yet; `src/geozarr_pyramid_maker/__init__.py` is the uv template stub.
+Start **M1** (detect + plan + chunking). Subagents: run `.venv/bin/python -m pytest` and `.venv/bin/ruff`, not `uv` (sandbox).
 
 ## Milestones
 
-- [ ] M0 Scaffold
+- [x] M0 Scaffold
 - [ ] M1 Detect+plan+chunking
 - [ ] M2 Resample+write
 - [ ] M3 Metadata+validation

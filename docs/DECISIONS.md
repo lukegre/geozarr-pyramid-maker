@@ -57,3 +57,15 @@ go to the top-left pixel and fill values are ignored. This is cheap enough that 
 ## D-15 — Project housekeeping · accepted 2026-09-29
 MIT license. Personal GitHub with Actions CI (py3.12–3.14); PyPI via trusted publishing after v0.1 is stable.
 Docs for v0.1 are the README plus `examples/`, with no docs site yet. The M6 reference test uses the notebook's basal-melt data (marked `slow`/`network`).
+
+## D-16 — Override geozarr-toolkit's convention `schema_url`s · accepted 2026-09-29
+toolkit 0.1.2 embeds `.../refs/tags/v1/schema.json` URLs that return 404, so we write the upstream `refs/tags/v0.1` URLs instead (and `zarr-conventions/proj` for proj:). The UUIDs are unchanged. **Why:** clients key on the UUID, but working URLs matter for humans and validators; revisit when the toolkit fixes them.
+
+## D-17 — xarray floor `>=2026.2.0` · accepted 2026-09-29
+sharded writes exist from 2025.01.2, but 2026.2.0 (PR #11117) fixed silent data corruption when dask chunks don't align with shards. **Why:** correctness; we align chunks to shards anyway, but this is defence in depth.
+
+## D-18 — Metadata uses the spec's resampling vocabulary · accepted 2026-09-29
+the user-facing option stays `resampling="mean"`, but `"average"` is written in the `resampling_method` metadata (the multiscales spec term). Other methods (nearest, mode, min, max) are written unchanged. **Why:** spec compliance while keeping the xarray-style API.
+
+## D-19 — Consolidate metadata explicitly · accepted 2026-09-29
+call `zarr.consolidate_metadata` at the end instead of `to_zarr(consolidated=True)`, and suppress only the `ZarrUserWarning` about consolidated metadata not being in the v3 spec. **Why:** refines D-07 without noisy warnings for users.

@@ -1,17 +1,58 @@
 [project]
 name = "geozarr-pyramid-maker"
 version = "0.1.0"
-description = "Add your description here"
+description = "Convert regular-grid xarray data into GeoZarr multiscale pyramids (Zarr v3, sharded)."
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 authors = [
     { name = "lukegre", email = "lukegre@gmail.com" }
 ]
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "dask[array]>=2025.1",
+    "geozarr-toolkit>=0.1.2",
+    "loguru>=0.7",
+    "numpy>=2",
+    "pyproj>=3.7",
+    "rioxarray>=0.19",
+    "typer>=0.12",
+    "xarray>=2026.2.0",
+    "zarr>=3.1",
+]
 
 [project.scripts]
-geozarr-pyramid-maker = "geozarr_pyramid_maker:main"
+geozarr-pyramid = "geozarr_pyramid_maker.cli:app"
+
+[project.optional-dependencies]
+cloud = [
+    "obstore>=0.11.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "slow: long-running tests",
+    "network: tests that need network access",
+]
+
+[dependency-groups]
+dev = [
+    "netcdf4>=1.7.4",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.9",
+]

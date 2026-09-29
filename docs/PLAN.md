@@ -130,6 +130,7 @@ Because odd edges are padded rather than trimmed (§4.3), the origin never moves
 - dtype is preserved (ints stay ints; floats stay in their precision). Attributes are carried through.
 - The method is recorded on each variable (`resampling_method`) and in `multiscales`: the top-level `resampling_method` when
   every variable uses the same method, otherwise per variable only.
+  `mean` is written as `average` in metadata ([D-18](DECISIONS.md#d-18)).
 
 ### 4.4 Chunks and shards (`chunking.py`) ([D-06](DECISIONS.md#d-06))
 For each level and variable, with `itemsize` from the dtype:
@@ -151,7 +152,7 @@ Built with `geozarr-toolkit` models and helpers (`create_spatial_attrs`, `create
 - `spatial:registration = "pixel"`, `spatial:transform_type = "affine"`.
 - CF: `grid_mapping="spatial_ref"` on every data var, and a `spatial_ref` variable written via `rio.write_crs`.
 - Root attrs: the source's global attrs, with `history` appended ("created by geozarr-pyramid-maker vX.Y on …").
-- Zarr **consolidated metadata** written at the end (one request for remote clients) ([D-07](DECISIONS.md#d-07)).
+- Zarr **consolidated metadata** written at the end with explicit `zarr.consolidate_metadata`, with the v3 warning suppressed ([D-19](DECISIONS.md#d-19)). One request for remote clients.
 
 ### 4.6 Writing (`write.py`)
 1. Build the plan, log a summary, and fail early (before any compute) on detection errors or if the store exists and `overwrite=False`.
@@ -213,7 +214,7 @@ geozarr-pyramid-maker/
     └── polar_basal_melt.py
 ```
 
-**Dependencies** (initial lower bounds, to be confirmed in M0): `xarray>=2025.6`, `zarr>=3.1`, `dask[array]>=2025.1`,
+**Dependencies** (initial lower bounds, to be confirmed in M0): `xarray>=2026.2.0`, `zarr>=3.1`, `dask[array]>=2025.1`,
 `numpy>=2`, `pyproj>=3.7`, `rioxarray>=0.19`, `geozarr-toolkit>=0.1.2`, `loguru>=0.7`, `typer>=0.12`.
 Optional extra `[cloud]`: `obstore` (D-13; the fsspec fallback needs `fsspec` + `s3fs`/`gcsfs` from the user).
 Dev: `pytest`, `pytest-cov`, `ruff`, `netcdf4` (fixtures), `pre-commit`. `requires-python = ">=3.12"` ([D-04](DECISIONS.md#d-04)).
