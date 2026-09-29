@@ -295,11 +295,15 @@ const wanted = params.get('store');
 if (wanted && wanted !== cfg.source) {
   try { cfg = await openStore(wanted); } catch (e) { startupError = e; }
 }
-document.title = `${cfg.title} | GeoZarr preview`;
+// Blank viewer: no store loaded yet (no variables). Global EPSG:4326 view with a basemap only.
+const blank = !(cfg.variables && cfg.variables.length);
+document.title = blank ? 'GeoZarr viewer' : `${cfg.title} | GeoZarr preview`;
 
 function initStorePicker() {
   const inp = $('storepath');
   inp.value = startupError ? wanted : cfg.source;
+  inp.placeholder = 'Enter a store path or URL…';
+  if (blank && !startupError) inp.focus();
   if (startupError) showStoreError(startupError);
   inp.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape') { inp.value = cfg.source; showStoreError(null); inp.blur(); return; }
@@ -399,7 +403,7 @@ function colorExpr(v) {
   return expr;
 }
 
-const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null, layers: [], sources: [],
+const state = {active: blank ? null : cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null, layers: [], sources: [],
   map: null, scrub: null, timer: null, optionsOpen: false};
 const cur = () => cfg.variables.find((v) => v.name === state.active);
 
@@ -421,6 +425,7 @@ function dimFromParam(d, raw) {
   return Number.isInteger(i) && i >= 0 && i < size ? i : null;
 }
 (function applyUrlState() {
+  if (blank) return;
   const v0 = params.get('var');
   if (v0 && cfg.variables.some((v) => v.name === v0)) state.active = v0;
   for (const d of Object.keys(cfg.dims)) {
@@ -446,17 +451,19 @@ let urlTimer = null;
 function syncUrl() {
   clearTimeout(urlTimer);
   urlTimer = setTimeout(() => {
-    const v = cur();
-    const st = styleOf(v);
     const q = new URLSearchParams();
-    q.set('store', cfg.source);
-    q.set('var', v.name);
-    for (const d of v.dims) q.set(d, dimToParam(d, state.dims[d] || 0));
-    q.set('cmap', st.cmap);
-    if (st.reversed) q.set('rev', '1');
-    q.set('vmin', String(+Number(st.vmin).toPrecision(6)));
-    q.set('vmax', String(+Number(st.vmax).toPrecision(6)));
-    if (state.opacity !== 1) q.set('opacity', String(state.opacity));
+    if (!blank) {
+      const v = cur();
+      const st = styleOf(v);
+      q.set('store', cfg.source);
+      q.set('var', v.name);
+      for (const d of v.dims) q.set(d, dimToParam(d, state.dims[d] || 0));
+      q.set('cmap', st.cmap);
+      if (st.reversed) q.set('rev', '1');
+      q.set('vmin', String(+Number(st.vmin).toPrecision(6)));
+      q.set('vmax', String(+Number(st.vmax).toPrecision(6)));
+      if (state.opacity !== 1) q.set('opacity', String(state.opacity));
+    }
     if (cfg.global) q.set('lon', String(state.centerLon));
     const view = state.map && state.map.getView();
     const c = view && view.getCenter && view.getCenter();
@@ -690,6 +697,7 @@ function refreshCards() {
 function buildInfo() {
   const box = $('infopanel');
   const row = (k, v) => { const d = h('div'); d.append(h('b', '', `${k}: `), v); box.append(d); };
+  if (blank) row('Store', 'none loaded; type a path or URL above and press Enter');
   row('CRS', cfg.crs.name);
   if (cfg.bbox) row('Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', '));
   $('infobtn').addEventListener('click', () => {
@@ -969,6 +977,10 @@ function makeLayer() {
 }
 
 function updateSpine() {
+  if (blank) {
+    $('sbspine').firstElementChild.replaceChildren(h('i', null, 'no store loaded'));
+    return;
+  }
   const v = cur();
   const span = $('sbspine').firstElementChild;
   span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '),
@@ -1027,8 +1039,7 @@ function initBasemap() {
     sel.disabled = true;
   }
   const apply = () => { for (const [k, l] of Object.entries(layers)) l.setVisible(sel.value === k); };
-  const prefersDark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  sel.value = cfg.basemap_default ? (prefersDark ? 'dark' : 'light') : 'none';
+  sel.value = cfg.basemap_default ? 'dark' : 'none';
   sel.addEventListener('change', apply);
   apply();
   return Object.values(layers);
@@ -1066,10 +1077,21 @@ function init() {
   updateSpine();
   $('sbspine').addEventListener('click', () => $('sbtoggle').click());
   buildInfo();
+  const basemaps = initBasemap();
+  if (blank) {
+    const b = cfg.bbox, lon = state.centerLon;
+    const opts = viewFor({projection: cfg.crs.code, center: [lon, 0], zoom: 2, showFullExtent: true,
+      extent: [lon - 180, b[1], lon + 180, b[3]]});
+    // A Promise<ViewOptions>: a View built here fails Map's instanceof check (separate +esm bundles).
+    state.map = new Map({target: 'map', layers: basemaps, view: Promise.resolve(opts)});
+    state.map.on('moveend', syncUrl);
+    syncUrl();
+    initCenterLon();
+    return;
+  }
   buildCards();
   refreshCards();
   buildScrubber(cur());
-  const basemaps = initBasemap();
   Object.assign(state, makeLayers());
   // Pass a promise: Map's `view` option accepts Promise<ViewOptions> and resolves it. The resolved
   // options are adjusted for the centre longitude.

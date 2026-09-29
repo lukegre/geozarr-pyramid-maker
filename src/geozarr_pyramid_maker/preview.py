@@ -601,11 +601,32 @@ def template_text() -> str:
     )
 
 
-def render_html(config: dict[str, Any]) -> str:
+def blank_config() -> dict[str, Any]:
+    """Config for the blank viewer: no store, global EPSG:4326 view with a basemap."""
+    return {
+        "title": "",
+        "source": "",
+        "store_url": "",
+        "ol_version": OL_VERSION,
+        "variables": [],
+        "dims": {},
+        "crs": {"code": "EPSG:4326", "name": "EPSG:4326", "proj4": None, "projection": None},
+        "bbox": [-180.0, -90.0, 180.0, 90.0],
+        "global": True,
+        "ramp": RAMP,
+        "colormaps": COLORMAPS,
+        "basemap_default": True,
+    }
+
+
+def render_html(config: dict[str, Any] | None = None) -> str:
+    """Fill the template; ``None`` gives the blank viewer."""
+    if config is None:
+        config = blank_config()
     payload = json.dumps(config, allow_nan=False).replace("</", "<\\/")
     return (
         template_text()
-        .replace("__TITLE__", html.escape(config["title"]))
+        .replace("__TITLE__", html.escape(config["title"] or "GeoZarr viewer"))
         .replace("__OL_VERSION__", OL_VERSION)
         .replace("__PROJ4_VERSION__", PROJ4_VERSION)
         .replace("__CONFIG_JSON__", payload)
@@ -640,8 +661,17 @@ class RangeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        if urlsplit(self.path).path == "/api/open":
+        path = urlsplit(self.path).path
+        if path == "/api/open":
             self._api_open()
+            return
+        if path in ("/", "/index.html") and getattr(self.server, "blank_viewer", False):
+            body = render_html(None).encode()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         self._send_file(head=False)
 
@@ -801,6 +831,30 @@ def preview(
     if serve:
         serve_page(out_path, store_path, port=port, open_browser=open_browser)
     return out_path
+
+
+def serve_viewer(
+    root: str | os.PathLike = ".",
+    *,
+    port: int = 8000,
+    open_browser: bool = False,
+    on_ready: Callable[[str], None] | None = None,
+) -> None:
+    """Serve the blank viewer at ``/`` until Ctrl-C; relative store paths resolve from ``root``."""
+    server = make_server(Path(root).resolve(), port)
+    server.blank_viewer = True  # type: ignore[attr-defined]
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    logger.info("Serving the GeoZarr viewer at {} (Ctrl-C to stop)", url)
+    if on_ready:
+        on_ready(url)
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("Stopping preview server")
+    finally:
+        server.server_close()
 
 
 def serve_page(
