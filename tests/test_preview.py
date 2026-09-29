@@ -415,7 +415,10 @@ def test_config_dim_iso_null_for_numeric(tmp_path):
 
 def test_template_layout_hooks(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
-    assert "dark_nolabels" in html and "light_nolabels" in html
+    assert "cartocdn" not in html and "nolabels" not in html  # keyless tiles only
+    assert "osm('bm-light')" in html and "osm('bm-dark')" in html
+    assert ".bm-light canvas" in html and ".bm-dark canvas" in html
+    assert "grayscale(1)" in html and "invert(1) hue-rotate(180deg)" in html
     assert "['light', 'Light']" in html and "['dark', 'Dark']" in html
     assert "matchMedia('(prefers-color-scheme: dark)')" in html
     assert "prefers-color-scheme: dark" in html
