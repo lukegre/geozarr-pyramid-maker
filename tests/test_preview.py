@@ -154,11 +154,6 @@ def test_missing_store(tmp_path):
         gpm.preview(tmp_path / "nope.zarr")
 
 
-def test_serve_rejects_remote():
-    with pytest.raises(ValueError):
-        gpm.preview("https://example.com/x.zarr", serve=True)
-
-
 # --------------------------------------------------------------------------- cli
 
 
@@ -263,14 +258,14 @@ def test_server_404_and_head(server):
 # ------------------------------------------------- handler without a bound port (socketpair)
 
 
-def _raw(directory, request: bytes) -> tuple[int, dict, bytes]:
+def _raw(directory, request: bytes, server=None) -> tuple[int, dict, bytes]:
     import socket
 
     a, b = socket.socketpair()
     try:
         a.sendall(request)
         a.shutdown(socket.SHUT_WR)
-        pv.RangeHandler(b, ("127.0.0.1", 0), None, directory=str(directory))
+        pv.RangeHandler(b, ("127.0.0.1", 0), server, directory=str(directory))
         b.close()
         raw = b""
         while chunk := a.recv(65536):
@@ -674,7 +669,11 @@ def _code_endpoint(src, endpoint):
 
 
 def _open_api(directory, query):
-    code, _, body = _raw(directory, f"GET /api/open?{query} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+    from types import SimpleNamespace
+
+    srv = SimpleNamespace(base_path="", mounts={})
+    req = f"GET /api/open?{query} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    code, _, body = _raw(directory, req, srv)
     assert code == 200
     return json.loads(body)
 
@@ -686,7 +685,12 @@ def test_api_open_passes_endpoint(tmp_path, monkeypatch):
         seen.update(store=store, endpoint=endpoint)
         return {"variables": [], "title": "t"}
 
+    import zarr
+
     monkeypatch.setattr(pv, "check_store", fake_check)
+    monkeypatch.setattr(
+        "geozarr_pyramid_maker.write._resolve_store", lambda s, o=None: zarr.storage.MemoryStore()
+    )
     cfg = _open_api(tmp_path, "store=s3://bkt/a.zarr&endpoint=https://e.org")["config"]
     assert seen == {"store": "s3://bkt/a.zarr", "endpoint": "https://e.org"}
     assert cfg["source"] == "s3://bkt/a.zarr" and cfg["endpoint"] == "https://e.org"
@@ -828,3 +832,221 @@ def test_viewer_under_base_path(tiny, tmp_path):
 def test_norm_base_path():
     assert pv._norm_base_path(None) == "" and pv._norm_base_path("/") == ""
     assert pv._norm_base_path("a/b/") == "/a/b" and pv._norm_base_path("/a") == "/a"
+
+
+# --------------------------------------------------------------------------- relay (D-31)
+
+_ZJSON = b'{"zarr_format": 3, "node_type": "group"}'
+_BLOB = bytes(range(100))
+
+
+@pytest.fixture
+def relay_server(tmp_path):
+    """A stand-in server (no port) with a local zarr store registered under a token."""
+    from types import SimpleNamespace
+
+    import zarr
+
+    root = tmp_path / "remote.zarr"
+    (root / "0" / "c").mkdir(parents=True)
+    (root / "zarr.json").write_bytes(_ZJSON)
+    (root / "0" / "c" / "0").write_bytes(_BLOB)
+    srv = SimpleNamespace(
+        base_path="", mounts={}, remotes={"tok123": zarr.storage.LocalStore(root)}
+    )
+    return srv, tmp_path
+
+
+def _relay_req(fx, path, method="GET", rng=None):
+    srv, directory = fx
+    extra = f"Range: {rng}\r\n" if rng else ""
+    req = f"{method} {path} HTTP/1.1\r\nHost: x\r\n{extra}\r\n".encode()
+    return _raw(directory, req, srv)
+
+
+def test_relay_full_get(relay_server):
+    code, headers, body = _relay_req(relay_server, "/remote/tok123/zarr.json")
+    assert code == 200 and body == _ZJSON
+    assert headers["Content-Type"] == "application/json"
+    assert headers["Accept-Ranges"] == "bytes"
+    assert headers["Access-Control-Allow-Origin"] == "*"
+    code, headers, body = _relay_req(relay_server, "/remote/tok123/0/c/0")
+    assert code == 200 and body == _BLOB
+    assert headers["Content-Type"] == "application/octet-stream"
+
+
+@pytest.mark.parametrize(
+    ("rng", "expected", "content_range"),
+    [
+        ("bytes=2-5", _BLOB[2:6], "bytes 2-5/100"),
+        ("bytes=-4", _BLOB[-4:], "bytes 96-99/100"),
+        ("bytes=3-", _BLOB[3:], "bytes 3-99/100"),
+        ("bytes=98-500", _BLOB[98:], "bytes 98-99/100"),
+    ],
+)
+def test_relay_ranges(relay_server, rng, expected, content_range):
+    code, headers, body = _relay_req(relay_server, "/remote/tok123/0/c/0", rng=rng)
+    assert code == 206 and body == expected
+    assert headers["Content-Range"] == content_range
+    assert headers["Content-Length"] == str(len(expected))
+    assert headers["Accept-Ranges"] == "bytes"
+
+
+def test_relay_head(relay_server):
+    code, headers, body = _relay_req(relay_server, "/remote/tok123/0/c/0", method="HEAD")
+    assert code == 200 and body == b"" and headers["Content-Length"] == "100"
+    code, headers, body = _relay_req(
+        relay_server, "/remote/tok123/0/c/0", method="HEAD", rng="bytes=-4"
+    )
+    assert code == 206 and body == b"" and headers["Content-Range"] == "bytes 96-99/100"
+
+
+def test_relay_not_found_and_traversal(relay_server):
+    assert _relay_req(relay_server, "/remote/tok123/nope/zarr.json")[0] == 404
+    assert _relay_req(relay_server, "/remote/other/zarr.json")[0] == 404
+    assert _relay_req(relay_server, "/remote/tok123/")[0] == 404  # no listing
+    assert _relay_req(relay_server, "/remote/tok123/0/../zarr.json")[0] in (400, 404)
+    assert _relay_req(relay_server, "/remote/tok123/%2e%2e/zarr.json")[0] in (400, 404)
+    assert _relay_req(relay_server, "/remote/tok123/0/..%2f..%2fx")[0] in (400, 404)
+
+
+def test_relay_backend_error_is_502(relay_server):
+    srv, _ = relay_server
+
+    class Broken:
+        async def get(self, *a, **k):
+            raise RuntimeError("boom")
+
+        async def getsize(self, key):
+            raise RuntimeError("boom")
+
+    srv.remotes["bad"] = Broken()
+    assert _relay_req(relay_server, "/remote/bad/zarr.json")[0] == 502
+
+
+def test_relay_registers_stable_token(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import zarr
+
+    monkeypatch.setattr(
+        "geozarr_pyramid_maker.write._resolve_store", lambda s, o=None: zarr.storage.MemoryStore()
+    )
+    srv = SimpleNamespace(base_path="/sessions/abc")
+    url = pv._relay(srv, "s3://bkt/a.zarr", {"endpoint": "https://e.org"})
+    assert re.fullmatch(r"/sessions/abc/remote/[0-9a-f]{12}/", url)
+    assert pv._relay(srv, "s3://bkt/a.zarr", {"endpoint": "https://e.org"}) == url
+    assert pv._relay(srv, "s3://bkt/b.zarr", {"endpoint": "https://e.org"}) != url
+    assert len(srv.remotes) == 2
+
+
+def test_api_open_returns_relay_url(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import zarr
+
+    seen = {}
+
+    def fake_check(store, *, label=None, endpoint=None):
+        return {"variables": [], "title": "t"}
+
+    def fake_resolve(store, options=None):
+        seen.update(store=store, options=options)
+        return zarr.storage.MemoryStore()
+
+    monkeypatch.setattr(pv, "check_store", fake_check)
+    monkeypatch.setattr("geozarr_pyramid_maker.write._resolve_store", fake_resolve)
+    srv = SimpleNamespace(base_path="", mounts={})
+    q = "store=s3://bkt/a.zarr&endpoint=https://e.org"
+    code, _, body = _raw(tmp_path, f"GET /api/open?{q} HTTP/1.1\r\nHost: x\r\n\r\n".encode(), srv)
+    cfg = json.loads(body)["config"]
+    assert code == 200
+    assert cfg["store_url"] == "https://e.org/bkt/a.zarr"  # direct stays
+    assert re.fullmatch(r"/remote/[0-9a-f]{12}/", cfg["relay_url"])
+    assert seen["store"] == "s3://bkt/a.zarr" and "https://e.org" in seen["options"].values()
+    assert cfg["relay_url"].split("/")[2] in srv.remotes
+
+
+def test_api_open_local_store_has_no_relay(tiny, tmp_path):
+    store = _pyramid(tiny, tmp_path)
+    cfg = _open_api(tmp_path, f"store={store.name}")["config"]
+    assert "relay_url" not in cfg
+
+
+def test_template_relay_fallback(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "relay_url" in html and "relayed" in html
+    assert (
+        "Relayed through the preview server (the bucket does not allow direct browser access)"
+        in html
+    )
+    assert "relay" in html.split("'browser_blocked'")[0].split("storeError(")[-1]
+
+
+def test_cli_preview_endpoint_passed_through(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_preview(store, **kw):
+        seen.update(store=store, **kw)
+        return tmp_path / "x.html"
+
+    monkeypatch.setattr(pv, "preview", fake_preview)
+    r = CliRunner().invoke(
+        app, ["preview", "s3://bkt/a.zarr", "--endpoint", "https://e.org", "--out", "o.html"]
+    )
+    assert r.exit_code == 0, r.output
+    assert seen["endpoint"] == "https://e.org"
+
+
+def test_preview_remote_bakes_endpoint_and_relay(tmp_path, monkeypatch):
+    import zarr
+
+    seen = {}
+
+    def fake_check(store, *, label=None, endpoint=None):
+        seen["endpoint"] = endpoint
+        return {"variables": [], "title": "a.zarr", "crs": {}, "bbox": None}
+
+    monkeypatch.setattr(pv, "check_store", fake_check)
+    monkeypatch.setattr(
+        "geozarr_pyramid_maker.write._resolve_store", lambda s, o=None: zarr.storage.MemoryStore()
+    )
+    from types import SimpleNamespace
+
+    served = []
+    fake_srv = SimpleNamespace(
+        base_path="",
+        mounts={},
+        server_address=("127.0.0.1", 1),
+        serve_forever=lambda: served.append(True),
+        server_close=lambda: None,
+    )
+    out = pv.preview(
+        "s3://bkt/a.zarr",
+        out=tmp_path / "o.html",
+        endpoint="https://e.org",
+        serve=True,
+        _server=fake_srv,
+    )
+    assert served
+    cfg = _config(out.read_text(encoding="utf-8"))
+    assert seen["endpoint"] == "https://e.org"
+    assert cfg["endpoint"] == "https://e.org"
+    assert cfg["store_url"] == "https://e.org/bkt/a.zarr"
+    assert cfg["relay_url"].startswith("/remote/")
+
+
+@pytest.mark.network
+def test_relay_serves_real_switch_store(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    for k in _CRED_VARS:
+        monkeypatch.delenv(k, raising=False)
+    src, endpoint = (
+        "s3://spi-pamir-public/test/oceansoda_dfco2.zarr",
+        "https://os.zhdk.cloud.switch.ch",
+    )
+    srv = SimpleNamespace(base_path="", mounts={})
+    url = pv._relay(srv, src, pv._storage_options(src, endpoint))
+    code, _, body = _raw(tmp_path, f"GET {url}zarr.json HTTP/1.1\r\nHost: x\r\n\r\n".encode(), srv)
+    assert code == 200 and json.loads(body)["zarr_format"] == 3
