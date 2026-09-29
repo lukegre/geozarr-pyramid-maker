@@ -70,7 +70,7 @@ def test_polar_html(polar_3031, tmp_path):
     assert v["vmin"] < v["vmax"]
     assert f"ol@{pv.OL_VERSION}/source/GeoZarr.js/+esm" in html
     assert f"ol@{pv.OL_VERSION}/ol.css" in html
-    assert "file://" not in html
+    assert not cfg["store_url"].startswith("file:")  # data is fetched over http
 
 
 def test_tiny_4326_html(tiny, tmp_path):
@@ -600,7 +600,7 @@ def test_server_api_open(server, tmp_path):
     payload = json.loads(body)
     assert status == 200 and payload["ok"] is True
     url = payload["config"]["store_url"]
-    assert url.startswith("/_stores/") and payload["config"]["source"] == str(store)
+    assert url.startswith("/_stores/") and payload["config"]["source"] == f"file://{store}"
     status, _, meta = _req(base + url + "zarr.json")
     assert status == 200 and b"multiscales" in meta
     assert _req(base + url + "../../etc/passwd")[0] == 404
@@ -629,3 +629,11 @@ def test_template_collapsed_spine(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert 'id="sbspine"' in html and "writing-mode: vertical-rl" in html
     assert "function updateSpine" in html and "body.collapsed #sbspine" in html
+
+
+def test_file_prefix(tiny, tmp_path):
+    store = _pyramid(tiny, tmp_path)
+    assert pv.check_store(f"file://{store}")["variables"]
+    assert pv.display_source("a/b.zarr") == "file://a/b.zarr"
+    assert pv.display_source("https://x/b.zarr") == "https://x/b.zarr"
+    assert _config(gpm.preview(store).read_text())["source"] == f"file://{store}"
