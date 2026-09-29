@@ -349,11 +349,13 @@ def _is_global(attrs: dict[str, Any]) -> bool:
     return abs((bbox[2] - bbox[0]) - 360.0) < 1e-6
 
 
-def read_config(store: str | os.PathLike) -> dict[str, Any]:
+def read_config(
+    store: str | os.PathLike, storage_options: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Collect everything the page needs from the store's root attrs and coarsest level."""
     from .write import _resolve_store
 
-    zstore = _resolve_store(store if _is_url(store) else str(store))
+    zstore = _resolve_store(store if _is_url(store) else str(store), storage_options)
     try:
         root = zarr.open_group(zstore, mode="r")
     except Exception as err:
@@ -491,11 +493,27 @@ def _check_local(path: Path, src: str) -> None:
         )
 
 
-def _open_root(store: str) -> zarr.Group:
+def _storage_options(store: str, endpoint: str | None) -> dict[str, Any] | None:
+    """storage_options for a custom S3 endpoint (s3:// stores only; ignored otherwise)."""
+    endpoint = (endpoint or "").strip()
+    if not endpoint or not store.lower().startswith("s3://"):
+        return None
+    if not re.match(r"https?://[^/\s]+", endpoint, re.IGNORECASE):
+        raise StoreError(
+            "bad_endpoint",
+            f"The S3 endpoint {endpoint!r} is not an http(s):// URL.",
+            "Use a full URL such as https://os.zhdk.cloud.switch.ch.",
+        )
+    from .write import _s3_endpoint_options
+
+    return _s3_endpoint_options(endpoint)
+
+
+def _open_root(store: str, storage_options: dict[str, Any] | None = None) -> zarr.Group:
     from .write import _CLOUD_HINT, _resolve_store
 
     try:
-        zstore = _resolve_store(store)
+        zstore = _resolve_store(store, storage_options)
     except ImportError as err:
         raise StoreError("missing_dependency", str(err), f"Try: {_CLOUD_HINT}") from err
     except Exception as err:
@@ -536,7 +554,9 @@ def display_source(src: str) -> str:
     return src if _is_url(src) else f"file://{src}"
 
 
-def check_store(store: str | os.PathLike, *, label: str | None = None) -> dict[str, Any]:
+def check_store(
+    store: str | os.PathLike, *, label: str | None = None, endpoint: str | None = None
+) -> dict[str, Any]:
     """Validate ``store`` for previewing and return its page config, or raise StoreError."""
     src = str(store).strip()
     if not src:
@@ -548,7 +568,8 @@ def check_store(store: str | os.PathLike, *, label: str | None = None) -> dict[s
         src_open = str(Path(local).expanduser())
     else:
         src_open = src
-    root = _open_root(src_open)
+    opts = _storage_options(src_open, endpoint)
+    root = _open_root(src_open, opts)
     attrs = dict(root.attrs)
     layout = (attrs.get("multiscales") or {}).get("layout")
     if not layout:
@@ -561,7 +582,7 @@ def check_store(store: str | os.PathLike, *, label: str | None = None) -> dict[s
             _convert_hint(shown),
         )
     try:
-        return read_config(src_open)
+        return read_config(src_open, opts)
     except StoreError:
         raise
     except Exception as err:
@@ -573,14 +594,19 @@ def check_store(store: str | os.PathLike, *, label: str | None = None) -> dict[s
         ) from err
 
 
-def browser_url(store: str) -> str:
-    """The http(s) URL a browser can fetch a remote store from (public buckets only)."""
+def browser_url(store: str, endpoint: str | None = None) -> str:
+    """The http(s) URL a browser can fetch a remote store from (public buckets only).
+
+    With ``endpoint`` (a custom S3 service), s3:// URLs become path-style URLs on it.
+    """
     parts = urlsplit(store)
     scheme = parts.scheme.lower()
     if scheme in ("http", "https"):
         return store
     bucket, key = parts.netloc, parts.path.lstrip("/")
     if scheme == "s3":
+        if endpoint and endpoint.strip():
+            return f"{endpoint.strip().rstrip('/')}/{bucket}/{quote(key)}"
         return f"https://{bucket}.s3.amazonaws.com/{quote(key)}"
     if scheme in ("gs", "gcs"):
         return f"https://storage.googleapis.com/{bucket}/{quote(key)}"
@@ -721,16 +747,19 @@ class RangeHandler(SimpleHTTPRequestHandler):
     def _api_open(self) -> None:
         query = parse_qs(urlsplit(self.path).query)
         src = (query.get("store") or [""])[0]
+        endpoint = (query.get("endpoint") or [""])[0].strip()
         try:
             # relative local paths resolve from the served directory, not the process cwd
             local = _local_path(src.strip())
             to_check = src
             if local is not None and local and not Path(local).expanduser().is_absolute():
                 to_check = str(Path(self.directory) / local)
-            config = check_store(to_check, label=src)
+            config = check_store(to_check, label=src, endpoint=endpoint)
             local = _local_path(src.strip())
             if local is None:
-                config["store_url"] = browser_url(src)
+                config["store_url"] = browser_url(src, endpoint or None)
+                if endpoint and src.strip().lower().startswith("s3://"):
+                    config["endpoint"] = endpoint
             else:
                 config["store_url"] = _mount(self.server, Path(_local_path(to_check)).expanduser())
         except StoreError as err:

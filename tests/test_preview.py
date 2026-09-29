@@ -585,6 +585,130 @@ def test_browser_url():
     assert pv.browser_url("https://x.org/b.zarr") == "https://x.org/b.zarr"
 
 
+def test_browser_url_with_endpoint():
+    ep = "https://os.zhdk.cloud.switch.ch/"
+    assert (
+        pv.browser_url("s3://bkt/a b/c.zarr", ep)
+        == "https://os.zhdk.cloud.switch.ch/bkt/a%20b/c.zarr"
+    )
+    assert pv.browser_url("gs://bkt/b.zarr", ep) == "https://storage.googleapis.com/bkt/b.zarr"
+    assert pv.browser_url("s3://bkt/a.zarr", None) == "https://bkt.s3.amazonaws.com/a.zarr"
+
+
+def test_storage_options_endpoint():
+    assert pv._storage_options("/local/x.zarr", "https://e.org") is None
+    assert pv._storage_options("s3://b/k", "") is None
+    opts = pv._storage_options("s3://b/k", "https://e.org")
+    assert "https://e.org" in opts.values() and set(opts) <= {
+        "endpoint",
+        "endpoint_url",
+        "skip_signature",
+        "anon",
+    }
+    with pytest.raises(pv.StoreError) as info:
+        pv._storage_options("s3://b/k", "e.org")
+    assert info.value.code == "bad_endpoint" and info.value.hint
+    assert _code_endpoint("s3://b/k.zarr", "ftp://e.org").code == "bad_endpoint"
+
+
+_CRED_VARS = ("AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_WEB_IDENTITY_TOKEN_FILE")
+
+
+@pytest.mark.parametrize("backend", ["obstore", "fsspec"])
+def test_endpoint_options_anonymous_without_credentials(backend, monkeypatch):
+    import sys
+
+    from geozarr_pyramid_maker.write import _s3_endpoint_options
+
+    for k in _CRED_VARS:
+        monkeypatch.delenv(k, raising=False)
+    if backend == "fsspec":
+        monkeypatch.setitem(sys.modules, "obstore", None)
+        monkeypatch.setitem(sys.modules, "obstore.store", None)
+        assert _s3_endpoint_options("https://e.org") == {
+            "endpoint_url": "https://e.org",
+            "anon": True,
+        }
+    else:
+        pytest.importorskip("obstore")
+        assert _s3_endpoint_options("https://e.org") == {
+            "endpoint": "https://e.org",
+            "skip_signature": True,
+        }
+
+
+@pytest.mark.parametrize("var", _CRED_VARS)
+@pytest.mark.parametrize("backend", ["obstore", "fsspec"])
+def test_endpoint_options_signed_with_credentials(backend, var, monkeypatch):
+    import sys
+
+    from geozarr_pyramid_maker.write import _s3_endpoint_options
+
+    for k in _CRED_VARS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv(var, "x")
+    if backend == "fsspec":
+        monkeypatch.setitem(sys.modules, "obstore", None)
+        monkeypatch.setitem(sys.modules, "obstore.store", None)
+        assert _s3_endpoint_options("https://e.org") == {"endpoint_url": "https://e.org"}
+    else:
+        pytest.importorskip("obstore")
+        assert _s3_endpoint_options("https://e.org") == {"endpoint": "https://e.org"}
+
+
+@pytest.mark.network
+def test_check_store_public_s3_with_endpoint(monkeypatch):
+    for k in _CRED_VARS:
+        monkeypatch.delenv(k, raising=False)
+    cfg = pv.check_store(
+        "s3://spi-pamir-public/test/oceansoda_dfco2.zarr",
+        endpoint="https://os.zhdk.cloud.switch.ch",
+    )
+    assert "dfco2" in [v["name"] for v in cfg["variables"]]
+
+
+def _code_endpoint(src, endpoint):
+    with pytest.raises(pv.StoreError) as info:
+        pv.check_store(src, endpoint=endpoint)
+    return info.value
+
+
+def _open_api(directory, query):
+    code, _, body = _raw(directory, f"GET /api/open?{query} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+    assert code == 200
+    return json.loads(body)
+
+
+def test_api_open_passes_endpoint(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_check(store, *, label=None, endpoint=None):
+        seen.update(store=store, endpoint=endpoint)
+        return {"variables": [], "title": "t"}
+
+    monkeypatch.setattr(pv, "check_store", fake_check)
+    cfg = _open_api(tmp_path, "store=s3://bkt/a.zarr&endpoint=https://e.org")["config"]
+    assert seen == {"store": "s3://bkt/a.zarr", "endpoint": "https://e.org"}
+    assert cfg["source"] == "s3://bkt/a.zarr" and cfg["endpoint"] == "https://e.org"
+    assert cfg["store_url"] == "https://e.org/bkt/a.zarr"
+    assert "endpoint" not in _open_api(tmp_path, "store=s3://bkt/a.zarr")["config"]
+
+
+def test_api_open_bad_endpoint(tmp_path):
+    err = _open_api(tmp_path, "store=s3://bkt/a.zarr&endpoint=nope")
+    assert err["ok"] is False and err["error"]["code"] == "bad_endpoint" and err["error"]["hint"]
+
+
+def test_template_settings_panel(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "infobtn" not in html and "infopanel" not in html
+    assert 'id="settingsbtn"' in html and 'aria-label="Settings"' in html
+    assert 'id="settingspanel"' in html and 'id="endpoint"' in html
+    assert "S3 endpoint URL" in html and "os.zhdk.cloud.switch.ch" in html
+    assert "api/open?store=" in html and "&endpoint=" in html
+    assert "q.set('endpoint'" in html
+
+
 def test_cli_preview_explains_bad_store(tiny, tmp_path):
     tiny.to_zarr(tmp_path / "flat.zarr", zarr_format=3, consolidated=False)
     res = CliRunner().invoke(app, ["preview", str(tmp_path / "flat.zarr")])
