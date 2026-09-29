@@ -289,16 +289,26 @@ async function openStore(src, endpoint) {
   const body = await res.json();
   if (!body.ok) throw storeError(body.error.message, body.error.hint, body.error.code);
   const c = body.config;
-  // Python could read it; check the browser can too (remote stores need public access and CORS).
-  const probe = new URL('zarr.json', new URL(c.store_url.endsWith('/') ? c.store_url : c.store_url + '/', location.href));
-  let ok = false;
-  try { ok = (await fetch(probe)).ok; } catch (_) { ok = false; }
-  if (!ok) {
+  // Python could read it; check the browser can too (direct first, then the server's relay).
+  const c2 = await reachable(c);
+  if (!c2) {
+    const probe = probeUrl(c.store_url);
     throw storeError(`The store is valid, but the browser cannot fetch ${probe.href}.`,
-      'Remote stores must be publicly readable and allow cross-origin requests (CORS) from this page; ' +
-      'private buckets cannot be previewed in the browser.', 'browser_blocked');
+      'Remote stores must be publicly readable and allow cross-origin requests (CORS) from this page' +
+      (c.relay_url ? ', and the preview server relay did not work either' : '; the preview server relay is not available here') +
+      '. Private buckets can be read through the relay only when the server has credentials for them.', 'browser_blocked');
   }
-  return c;
+  return c2;
+}
+const probeUrl = (u) => new URL('zarr.json', new URL(u.endsWith('/') ? u : u + '/', location.href));
+async function canFetch(u) {
+  try { return (await fetch(probeUrl(u))).ok; } catch (_) { return false; }
+}
+// c with a working store_url: the direct one, else the relay (relayed = true); null if neither works.
+async function reachable(c) {
+  if (await canFetch(c.store_url)) return c;
+  if (c.relay_url && await canFetch(c.relay_url)) return {...c, store_url: c.relay_url, relayed: true};
+  return null;
 }
 
 const params = new URLSearchParams(location.search);
@@ -315,6 +325,9 @@ if (wanted === '' && cfg.variables && cfg.variables.length) {
     crs: {code: 'EPSG:4326', name: 'EPSG:4326', proj4: null, projection: null}};
 } else if (wanted && (wanted !== cfg.source || wantedEndpoint !== (cfg.endpoint || ''))) {
   try { cfg = await openStore(wanted, wantedEndpoint); } catch (e) { startupError = e; }
+} else if (cfg.relay_url && /^https?:/i.test(cfg.store_url || '')) {
+  // baked config of a remote store: fall back to the relay when the direct URL is blocked
+  cfg = (await reachable(cfg)) || cfg;
 }
 // Blank viewer: no store loaded yet (no variables). Global EPSG:4326 view with a basemap only.
 const blank = !(cfg.variables && cfg.variables.length);
@@ -741,6 +754,7 @@ function buildInfo() {
   const row = (k, v) => { const d = h('div'); d.append(h('b', '', `${k}: `), v); box.append(d); };
   if (blank) row('Store', 'none loaded; type a path or URL above and press Enter');
   row('CRS', cfg.crs.name);
+  if (cfg.relayed) box.append(h('div', '', 'Relayed through the preview server (the bucket does not allow direct browser access)'));
   if (cfg.bbox) row('Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', '));
   const panel = $('settingspanel');
   $('settingsbtn').addEventListener('click', () => {

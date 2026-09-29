@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import hashlib
 import html
 import json
 import math
@@ -17,7 +18,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import numpy as np
 import pyproj
@@ -723,6 +724,9 @@ class RangeHandler(SimpleHTTPRequestHandler):
         if path == "/api/open":
             self._api_open()
             return
+        if path.startswith(f"/{REMOTE_PREFIX}/"):
+            self._send_remote(head=False)
+            return
         if path in ("/", "/index.html") and getattr(self.server, "blank_viewer", False):
             config = blank_config()
             config["api_base"] = getattr(self.server, "base_path", "") + "/"
@@ -757,7 +761,9 @@ class RangeHandler(SimpleHTTPRequestHandler):
             config = check_store(to_check, label=src, endpoint=endpoint)
             local = _local_path(src.strip())
             if local is None:
+                opts = _storage_options(src.strip(), endpoint)
                 config["store_url"] = browser_url(src, endpoint or None)
+                config["relay_url"] = _relay(self.server, src.strip(), opts)
                 if endpoint and src.strip().lower().startswith("s3://"):
                     config["endpoint"] = endpoint
             else:
@@ -768,6 +774,51 @@ class RangeHandler(SimpleHTTPRequestHandler):
             return
         config["source"] = display_source(src.strip())
         self._send_json(HTTPStatus.OK, {"ok": True, "config": config})
+
+    def _send_remote(self, head: bool) -> None:
+        """GET/HEAD /remote/<token>/<key...>: read one key of a registered remote store."""
+        parts = unquote(urlsplit(self.path).path).split("/")[2:]  # after "", "remote"
+        remotes = getattr(self.server, "remotes", {})
+        token, key_parts = (parts[0], parts[1:]) if parts else ("", [])
+        key = "/".join(key_parts)
+        if (
+            token not in remotes
+            or not key
+            or any(p in ("", ".", "..") or "\\" in p or "\0" in p for p in key_parts)
+        ):
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return
+        header = self.headers.get("Range")
+        try:
+            data, total, rng = _read_remote(remotes[token], key, header)
+        except FileNotFoundError:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return
+        except Exception as err:
+            logger.info("preview relay: cannot read {!r}: {}", key, err)
+            self.send_error(HTTPStatus.BAD_GATEWAY, "Cannot read the remote store")
+            return
+        if rng == "bad":
+            self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+            self.send_header("Content-Range", f"bytes */{total}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        status = HTTPStatus.OK if rng is None else HTTPStatus.PARTIAL_CONTENT
+        self.send_response(status)
+        ctype = "application/json" if key.rsplit("/", 1)[-1] == "zarr.json" else None
+        self.send_header("Content-Type", ctype or "application/octet-stream")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(len(data)))
+        if rng is not None:
+            self.send_header("Content-Range", f"bytes {rng[0]}-{rng[1]}/{total}")
+        self.end_headers()
+        if not head:
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("preview server: client closed the connection")
 
     def translate_path(self, path: str) -> str:
         mounts = getattr(self.server, "mounts", {})
@@ -782,6 +833,9 @@ class RangeHandler(SimpleHTTPRequestHandler):
 
     def do_HEAD(self) -> None:
         if self._redirect_or_outside():
+            return
+        if urlsplit(self.path).path.startswith(f"/{REMOTE_PREFIX}/"):
+            self._send_remote(head=True)
             return
         self._send_file(head=True)
 
@@ -847,6 +901,83 @@ class RangeHandler(SimpleHTTPRequestHandler):
 
 
 MOUNT_PREFIX = "_stores"
+REMOTE_PREFIX = "remote"
+
+
+def _read_remote(store: Any, key: str, header: str | None):
+    """Read ``key`` (or one byte range of it) from a zarr Store: (bytes, total, range).
+
+    ``range`` is None (whole object), "bad" (unsatisfiable) or an inclusive (start, end).
+    Raises FileNotFoundError for a missing key.
+    """
+    from zarr.abc.store import OffsetByteRequest, RangeByteRequest, SuffixByteRequest
+    from zarr.core.buffer import default_buffer_prototype
+    from zarr.core.sync import sync
+
+    proto = default_buffer_prototype()
+    m = (
+        re.fullmatch(r"(\d*)-(\d*)", header[6:].strip())
+        if header and header.startswith("bytes=")
+        else None
+    )
+    if m and (m.group(1) or m.group(2)) and "," not in (header or ""):
+        first, last = m.groups()
+        total = sync(store.getsize(key)) if _exists(store, key) else None
+        if total is None:
+            raise FileNotFoundError(key)
+        if first == "":
+            n = int(last)
+            if n == 0 or total == 0:
+                return b"", total, "bad"
+            start, end = max(0, total - n), total - 1
+            req = SuffixByteRequest(n)
+        else:
+            start = int(first)
+            end = min(int(last), total - 1) if last else total - 1
+            if start >= total:
+                return b"", total, "bad"
+            if end < start:  # malformed (last < first): ignore the header like the file handler
+                m = None
+            req = (
+                OffsetByteRequest(start)
+                if not last or end == total - 1
+                else RangeByteRequest(start, end + 1)
+            )
+        if m:
+            buf = sync(store.get(key, prototype=proto, byte_range=req))
+            if buf is None:
+                raise FileNotFoundError(key)
+            return buf.to_bytes(), total, (start, end)
+    buf = sync(store.get(key, prototype=proto))
+    if buf is None:
+        raise FileNotFoundError(key)
+    data = buf.to_bytes()
+    return data, len(data), None
+
+
+def _exists(store: Any, key: str) -> bool:
+    from zarr.core.sync import sync
+
+    return bool(sync(store.exists(key)))
+
+
+def _relay_token(src: str, storage_options: dict[str, Any] | None) -> str:
+    raw = src + "\0" + json.dumps(storage_options or {}, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def _relay(server: Any, src: str, storage_options: dict[str, Any] | None = None) -> str:
+    """Register a remote store for ``/remote/<token>/<key>`` reads; return its URL path.
+
+    The URL carries the server's base path like the ``_mount`` URLs do.
+    """
+    from .write import _resolve_store
+
+    remotes: dict[str, Any] = server.__dict__.setdefault("remotes", {})
+    token = _relay_token(src, storage_options)
+    if token not in remotes:
+        remotes[token] = _resolve_store(src, storage_options)
+    return f"{getattr(server, 'base_path', '')}/{REMOTE_PREFIX}/{token}/"
 
 
 def _mount(server: Any, path: Path) -> str:
@@ -893,17 +1024,32 @@ def preview(
     serve: bool = False,
     port: int = 8000,
     open_browser: bool = False,
+    endpoint: str | None = None,
+    on_written: Callable[[Path], None] | None = None,
+    on_ready: Callable[[str], None] | None = None,
+    _server: Any = None,
 ) -> Path:
-    """Write an OpenLayers preview page for ``store`` and optionally serve it locally."""
+    """Write an OpenLayers preview page for ``store`` and optionally serve it locally.
+
+    Remote stores can be served too: the server then relays them (D-31) for buckets the
+    browser cannot fetch directly. ``endpoint`` is a custom S3 service URL for s3:// stores.
+    """
     remote = _is_url(store)
-    if remote and serve:
-        raise ValueError("serve=True needs a local store; remote URLs can only get an HTML page.")
-    config = check_store(store)
+    endpoint = (endpoint or "").strip() or None
+    config = check_store(store, endpoint=endpoint)
     name = config["title"]
+    server = _server
     if remote:
         out_path = Path(out) if out else Path.cwd() / f"{name}.preview.html"
-        config["store_url"] = str(store)
-        config["source"] = str(store)
+        src = str(store)
+        config["store_url"] = browser_url(src, endpoint)
+        config["source"] = src
+        if endpoint and src.lower().startswith("s3://"):
+            config["endpoint"] = endpoint
+        if serve:
+            if server is None:
+                server = make_server(out_path.parent.resolve(), port)
+            config["relay_url"] = _relay(server, src, _storage_options(src, endpoint))
     else:
         store_path = Path(store).resolve()
         out_path = Path(out) if out else store_path.parent / f"{name}.preview.html"
@@ -912,8 +1058,13 @@ def preview(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(render_html(config), encoding="utf-8")
     logger.info("Preview page written to {}", out_path)
+    if on_written:
+        on_written(out_path)
     if serve:
-        serve_page(out_path, store_path, port=port, open_browser=open_browser)
+        serve_page(
+            out_path, None if remote else store_path, port=port, open_browser=open_browser,
+            on_ready=on_ready, server=server,
+        )  # fmt: skip
     return out_path
 
 
@@ -949,15 +1100,24 @@ def serve_viewer(
 
 def serve_page(
     html_path: Path,
-    store_path: Path,
+    store_path: Path | None,
     *,
     port: int = 8000,
     open_browser: bool = False,
     on_ready: Callable[[str], None] | None = None,
+    server: ThreadingHTTPServer | None = None,
 ) -> None:
-    """Serve ``html_path`` and ``store_path`` (via their common parent) until Ctrl-C."""
-    root = Path(os.path.commonpath([html_path.resolve().parent, store_path.resolve().parent]))
-    server = make_server(root, port)
+    """Serve ``html_path`` and ``store_path`` (via their common parent) until Ctrl-C.
+
+    ``store_path`` is None for a remote store (relayed through ``server``, which must then
+    be rooted at the page's directory).
+    """
+    parents = [html_path.resolve().parent]
+    if store_path is not None:
+        parents.append(store_path.resolve().parent)
+    root = Path(os.path.commonpath(parents))
+    if server is None:
+        server = make_server(root, port)
     rel = Path(os.path.relpath(html_path.resolve(), root)).as_posix()
     url = f"http://127.0.0.1:{server.server_address[1]}/{rel}"
     logger.info("Serving {} at {} (Ctrl-C to stop)", root, url)

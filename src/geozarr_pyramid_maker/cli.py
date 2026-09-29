@@ -244,13 +244,20 @@ def preview(
             help="URL prefix when served behind a proxy (defaults to $RENKU_BASE_URL_PATH).",
         ),
     ] = "",
+    endpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--endpoint",
+            help="Custom S3 endpoint URL for an s3:// STORE (e.g. https://os.zhdk.cloud.switch.ch).",
+        ),
+    ] = None,
 ) -> None:
     """Write an OpenLayers preview page for STORE, optionally serving it.
 
     Without STORE, serve a blank viewer that can open any pyramid.
     """
     from .preview import preview as _preview
-    from .preview import serve_page, serve_viewer
+    from .preview import serve_viewer
 
     if store is None:
         with _clean_errors():
@@ -267,15 +274,13 @@ def preview(
         typer.echo(f"Error: store {store!r} does not exist.", err=True)
         raise typer.Exit(2)
     with _clean_errors():
-        path = _preview(store, out=out)
-        typer.echo(f"html: {path}")
-        if serve:
-            if "://" in store:
-                raise ValueError("--serve needs a local store.")
-            serve_page(
-                path,
-                Path(store),
-                port=port,
-                open_browser=open_browser,
-                on_ready=lambda url: typer.echo(f"url: {url}"),
-            )
+        _preview(
+            store,
+            out=out,
+            serve=serve,
+            port=port,
+            open_browser=open_browser,
+            endpoint=endpoint,
+            on_written=lambda path: typer.echo(f"html: {path}"),
+            on_ready=lambda url: typer.echo(f"url: {url}"),
+        )
