@@ -477,3 +477,22 @@ def test_template_style_controls(tiny, tmp_path):
     ):
         assert token in html, token
     assert ".ol-attribution.ol-uncollapsible" in html  # OL's uncollapsible rule sets bottom:0
+
+
+def test_template_centre_longitude_hooks(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    for token in (
+        'id="clon"',
+        "Centre longitude",
+        "gpm-preview:view:",
+        "wrapX: true",
+        "moveend",
+        "transform(",
+        "$('viewsec').hidden = !cfg.basemap_default",
+        "data-lon",
+    ):
+        assert token in html, token
+    assert "ol@" in html and "/proj.js/+esm" in html
+    assert (
+        "extent:" not in html.split('<script type="module">')[1]
+    )  # nothing blocks panning past 180
