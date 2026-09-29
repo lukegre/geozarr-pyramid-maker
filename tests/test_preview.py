@@ -623,3 +623,9 @@ def test_template_url_state(tiny, tmp_path):
     for key in ("'store'", "'var'", "'cmap'", "'rev'", "'vmin'", "'vmax'", "'x'", "'z'"):
         assert f"q.set({key}" in html
     assert "applyUrlState" in html and "state.map.on('moveend', syncUrl)" in html
+
+
+def test_template_collapsed_spine(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert 'id="sbspine"' in html and "writing-mode: vertical-rl" in html
+    assert "function updateSpine" in html and "body.collapsed #sbspine" in html
