@@ -4,7 +4,7 @@
 services:
   viewer:
     build: .
-    image: ghcr.io/lukegre/geozarr-viewer:latest
+    image: lukegre/geozarr-viewer:latest
     ports:
       - "127.0.0.1:${GEOZARR_VIEWER_PORT:-8888}:8888"
     volumes:

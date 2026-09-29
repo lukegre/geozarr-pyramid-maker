@@ -98,14 +98,15 @@ out.zarr/                 zarr.json: zarr_conventions (multiscales, spatial:, pr
 
 The `Dockerfile` builds an image that starts the blank viewer (`geozarr-pyramid preview` with no
 store) on port 8888. Type a store path or URL into the sidebar to open any pyramid; relative paths
-resolve from the working directory. CI (`.github/workflows/docker.yml`) publishes it to
-`ghcr.io/lukegre/geozarr-viewer` on every push to `main`.
+resolve from the working directory. CI (`.github/workflows/docker.yml`) publishes it to Docker Hub as
+`lukegre/geozarr-viewer` on every push to `main` (needs repo secrets `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN`).
 
 **RenkuLab session launcher**: add a custom environment with
 
 | Field | Value |
 |---|---|
-| Container image | `ghcr.io/lukegre/geozarr-viewer:latest` |
+| Container image | `lukegre/geozarr-viewer:latest` |
 | Default URL | `/` |
 | Port | `8888` |
 | UID / GID | `1000` / `100` |
@@ -113,8 +114,8 @@ resolve from the working directory. CI (`.github/workflows/docker.yml`) publishe
 | Command / Arguments | leave empty (the image's entrypoint is used) |
 
 The server reads `RENKU_BASE_URL_PATH` (RenkuLab does not strip it) and `RENKU_WORKING_DIR`, so
-data connectors and project files under the working directory open by relative path. Make the
-ghcr package public, or add registry credentials in RenkuLab.
+data connectors and project files under the working directory open by relative path. Keep the Docker Hub
+repository public, or add registry credentials in RenkuLab.
 
 **Locally**: `docker compose up --build`, then open <http://127.0.0.1:8888/>. Stores in `./data`
 (or `DATA_DIR=/path/to/stores`) are mounted as the working directory. Set `RENKU_BASE_URL_PATH`
