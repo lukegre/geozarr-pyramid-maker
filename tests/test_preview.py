@@ -422,7 +422,7 @@ def test_template_layout_hooks(tiny, tmp_path):
     assert ".bm-light canvas" in html and ".bm-dark canvas" in html
     assert "grayscale(1)" in html and "invert(1) hue-rotate(180deg)" in html
     assert "['light', 'Light']" in html and "['dark', 'Dark']" in html
-    assert "matchMedia('(prefers-color-scheme: dark)')" in html
+    assert "cfg.basemap_default ? 'dark' : 'none'" in html  # always dark by default
     assert "prefers-color-scheme: dark" in html
     assert "localStorage" in html
     assert "getData(" in html
@@ -637,3 +637,34 @@ def test_file_prefix(tiny, tmp_path):
     assert pv.display_source("a/b.zarr") == "file://a/b.zarr"
     assert pv.display_source("https://x/b.zarr") == "https://x/b.zarr"
     assert _config(gpm.preview(store).read_text())["source"] == f"file://{store}"
+
+
+def test_blank_viewer_html():
+    html = pv.render_html(None)
+    cfg = _config(html)
+    assert cfg["variables"] == [] and cfg["global"] is True and cfg["basemap_default"] is True
+    assert cfg["crs"]["code"] == "EPSG:4326" and cfg["bbox"] == [-180.0, -90.0, 180.0, 90.0]
+    assert "__" not in re.sub(r"__proto__", "", html.split('<script type="module">')[0])
+    assert "const blank = " in html and "GeoZarr viewer" in html
+
+
+def test_server_serves_blank_viewer(server):
+    base, _ = server
+    assert _req(base + "/")[0] == 404  # plain page server: no viewer at /
+
+
+def test_serve_viewer_root(tmp_path):
+    try:
+        srv = pv.make_server(tmp_path, 0)
+    except OSError as err:
+        pytest.skip(f"cannot bind a local port here: {err}")
+    srv.blank_viewer = True
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, headers, body = _req(f"http://127.0.0.1:{srv.server_address[1]}/")
+        assert status == 200 and "text/html" in headers["Content-Type"]
+        assert _config(body.decode())["variables"] == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
