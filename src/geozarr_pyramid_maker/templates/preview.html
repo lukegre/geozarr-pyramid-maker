@@ -332,6 +332,23 @@ const ICON = {
 
 // --------------------------------------------------------------------------- sidebar cards
 
+// Centre every label on its tick, nudge the end ones back inside the bar, hide colliding labels.
+function layoutTicks(ticks) {
+  const box = ticks.getBoundingClientRect();
+  if (!box.width) return;  // sidebar collapsed / not laid out yet
+  let right = -Infinity;
+  for (const lab of ticks.querySelectorAll('.tlabel')) {
+    lab.style.visibility = 'visible';
+    lab.style.transform = 'translateX(-50%)';
+    const r = lab.getBoundingClientRect();
+    const shift = r.left < box.left ? box.left - r.left : (r.right > box.right ? box.right - r.right : 0);
+    if (shift) lab.style.transform = `translateX(calc(-50% + ${shift}px))`;
+    const left = r.left + shift;
+    if (left < right + 4) lab.style.visibility = 'hidden';
+    else right = left + r.width;
+  }
+}
+
 function buildLegend(v) {
   const el = h('div', 'legend');
   if (v.categorical) {
@@ -349,18 +366,16 @@ function buildLegend(v) {
   bar.style.background = gradientCss(stopsOf(st));
   const ticks = h('div', 'ticks');
   const values = niceTicks(st.vmin, st.vmax);
-  const units = unitsOf(v);
-  values.forEach((t, i) => {
+  values.forEach((t) => {
     const p = clamp(100 * (t - st.vmin) / (st.vmax - st.vmin), 0, 100);
     const mark = h('span', 'tick');
     mark.style.left = `${p}%`;
-    const last = i === values.length - 1;
-    const lab = h('span', 'tlabel', fmt(t) + (last && units ? ` ${units}` : ''));
+    const lab = h('span', 'tlabel', fmt(t));  // units are in the card's metadata line
     lab.style.left = `${p}%`;
-    // keep the end labels inside the bar
-    lab.style.transform = last && p > 50 ? 'translateX(-100%)' : (p < 6 ? 'none' : 'translateX(-50%)');
+    lab.style.transform = 'translateX(-50%)';
     ticks.append(mark, lab);
   });
+  if (window.ResizeObserver) new ResizeObserver(() => layoutTicks(ticks)).observe(ticks);
   el.append(bar, ticks);
   return el;
 }
