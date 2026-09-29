@@ -483,7 +483,7 @@ function buildStyleControls(v, opts, entry) {
     styleOf(v).vmin = a; styleOf(v).vmax = b;
     apply(false);
   };
-  sel.addEventListener('change', () => { styleOf(v).cmap = sel.value; apply(false); });
+  sel.addEventListener('change', () => { styleOf(v).cmap = sel.value; styleOf(v).reversed = false; apply(false); });
   rev.addEventListener('change', () => { styleOf(v).reversed = rev.checked; apply(false); });
   minIn.addEventListener('change', setRange);
   maxIn.addEventListener('change', setRange);
