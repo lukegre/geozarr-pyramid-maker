@@ -3,41 +3,184 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>__TITLE__ | GeoZarr preview</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/ol.css">
 <style>
-  html, body { height: 100%; margin: 0; font: 13px/1.4 system-ui, sans-serif; }
-  #map { position: absolute; inset: 0; background: #1b1f24; }
-  #panel { position: absolute; top: 8px; right: 8px; z-index: 5; width: 250px; padding: 10px 12px;
-    background: rgba(255,255,255,.93); border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.35); }
-  #panel h1 { font-size: 14px; margin: 0 0 8px; word-break: break-all; }
-  #panel label { display: block; margin: 6px 0 2px; font-weight: 600; }
-  #panel select, #panel input[type=range] { width: 100%; box-sizing: border-box; }
-  #panel .row { display: flex; align-items: center; gap: 6px; font-weight: 400; }
-  #legend { margin-top: 10px; }
-  #legend .bar { height: 12px; border-radius: 2px; border: 1px solid #888; }
-  #legend .ends { display: flex; justify-content: space-between; font-size: 12px; }
-  #legend .swatch { display: inline-block; width: 12px; height: 12px; margin-right: 4px;
-    vertical-align: middle; border: 1px solid #666; }
-  #note, #error { margin-top: 8px; font-size: 11px; color: #555; }
-  #error { color: #b00020; white-space: pre-wrap; }
+  :root {
+    --sp: 8px;
+    --radius: 8px;
+    --sb-w: 320px;
+    --scrub-h: 0px;
+    --card: #ffffff;
+    --card-line: rgba(0, 0, 0, .08);
+    --sidebar: #f3f4f6;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --rail: rgba(0, 0, 0, .16);
+    --hover: rgba(127, 127, 127, .16);
+    --shadow: 0 1px 3px rgba(0, 0, 0, .14), 0 1px 2px rgba(0, 0, 0, .08);
+    --map-bg: #111418;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --card: rgba(22, 27, 34, .92);
+      --card-line: rgba(255, 255, 255, .08);
+      --sidebar: #0d1117;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --accent: #58a6ff;
+      --rail: rgba(255, 255, 255, .22);
+      --shadow: 0 1px 3px rgba(0, 0, 0, .55);
+    }
+  }
+  body.collapsed { --sb-w: 36px; }
+  body.has-scrub { --scrub-h: 76px; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+    background: var(--map-bg); overflow: hidden; }
+  input, select, button { font: inherit; color: inherit; accent-color: var(--accent); }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  #map { position: absolute; top: 0; bottom: 0; right: 0; left: var(--sb-w); background: var(--map-bg); }
+
+  /* sidebar */
+  #sidebar { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sb-w); z-index: 5;
+    display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;
+    background: var(--sidebar); border-right: 1px solid var(--card-line); }
+  #sbtoggle { position: absolute; top: var(--sp); right: var(--sp); z-index: 2; width: 28px; height: 28px;
+    display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent;
+    color: var(--muted); }
+  #sbtoggle:hover, .iconbtn:hover { background: var(--hover); color: var(--text); }
+  #sbtoggle svg { width: 16px; height: 16px; }
+  body.collapsed #sbtoggle { right: 4px; }
+  body.collapsed #sbtoggle svg { transform: rotate(180deg); }
+  body.collapsed #sidebar > :not(#sbtoggle) { display: none; }
+  #sbhead { padding: 12px 44px 4px 16px; display: flex; align-items: flex-start; gap: var(--sp); }
+  #sbhead h1 { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600;
+    overflow-wrap: anywhere; }
+  .iconbtn { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
+    border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+  .iconbtn svg { width: 16px; height: 16px; }
+  #infopanel { margin: 4px var(--sp) 0; padding: var(--sp) 12px; border-radius: var(--radius);
+    background: var(--card); box-shadow: var(--shadow); font-size: 12px; color: var(--muted); }
+  #infopanel b { color: var(--text); font-weight: 600; }
+  #infopanel div + div { margin-top: 2px; }
+  #cards { flex: 1; overflow: auto; padding: var(--sp); display: flex; flex-direction: column; gap: var(--sp); }
+  .card { padding: 12px; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow);
+    border: 1px solid var(--card-line); cursor: pointer; }
+  .card:hover { border-color: var(--muted); }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+  .card .top { display: flex; align-items: flex-start; gap: var(--sp); }
+  .card .name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .card .meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
+  .card .gear { display: none; }
+  .card.active .gear { display: grid; }
+  .card .gear[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+  .card .opts { display: none; margin-top: var(--sp); align-items: center; gap: var(--sp);
+    font-size: 12px; color: var(--muted); }
+  .card.active.open .opts { display: flex; }
+  .card .opts input { flex: 1; min-width: 0; }
+  .legend { margin-top: 12px; }
+  .legend .bar { height: 10px; border-radius: 5px; }
+  .legend .ticks { position: relative; height: 24px; margin-top: 2px;
+    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend .tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--muted); }
+  .legend .tlabel { position: absolute; top: 6px; white-space: nowrap; line-height: 14px; }
+  .legend .cat { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 4px;
+    font-variant-numeric: tabular-nums; }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  #sbfoot { padding: 12px 16px; border-top: 1px solid var(--card-line); }
+  #sbfoot label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  #sbfoot select { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px;
+    border: 1px solid var(--card-line); background: var(--card); }
+  #note, #error { margin-top: var(--sp); font-size: 11px; color: var(--muted); }
+  #error { color: #d1242f; white-space: pre-wrap; }
+
+  /* time scrubber */
+  #scrubber { position: absolute; z-index: 4; left: calc(var(--sb-w) + var(--sp)); right: var(--sp);
+    bottom: var(--sp); height: 68px; box-sizing: border-box; padding: 4px 12px; display: flex;
+    align-items: flex-start; gap: var(--sp); border-radius: var(--radius); background: var(--card);
+    box-shadow: var(--shadow); border: 1px solid var(--card-line); user-select: none; }
+  #scrubber .ctl { display: flex; align-items: center; gap: 2px; padding-top: 22px; flex: none; }
+  #scrubber .ctl button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
+    border: 0; border-radius: 6px; background: transparent; }
+  #scrubber .ctl button:hover { background: var(--hover); }
+  #scrubber .ctl svg { width: 16px; height: 16px; }
+  #scrubber .dname { flex: none; padding-top: 30px; font-size: 12px; color: var(--muted); }
+  #scrubber .track { position: relative; flex: 1; min-width: 0; height: 60px; margin: 0 20px; touch-action: none;
+    cursor: pointer; }
+  #scrubber .rail { position: absolute; left: 0; right: 0; top: 30px; height: 4px; border-radius: 2px;
+    background: var(--rail); }
+  #scrubber .mark { position: absolute; width: 1px; background: var(--muted); opacity: .8; }
+  #scrubber .mark.minor { top: 38px; height: 4px; opacity: .5; }
+  #scrubber .mark.major { top: 38px; height: 7px; }
+  #scrubber .tlabel { position: absolute; top: 46px; transform: translateX(-50%); font-size: 11px;
+    line-height: 14px; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #scrubber .handle { position: absolute; top: 24px; width: 16px; height: 16px; margin-left: -8px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--card); box-sizing: border-box;
+    box-shadow: 0 0 0 1px var(--accent); cursor: grab; }
+  #scrubber .bubble { position: absolute; top: 0; transform: translateX(-50%); padding: 1px 8px;
+    border-radius: 6px; background: var(--accent); color: #fff; font-size: 12px; line-height: 18px;
+    white-space: nowrap; font-variant-numeric: tabular-nums; pointer-events: none; }
+  #dimstack { position: absolute; z-index: 4; right: var(--sp); bottom: calc(var(--scrub-h) + 44px);
+    display: flex; gap: var(--sp); }
+  #dimstack .dim { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--sp);
+    border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow);
+    border: 1px solid var(--card-line); font-size: 12px; }
+  #dimstack .dim .lab { color: var(--muted); }
+  #dimstack .dim .val { font-variant-numeric: tabular-nums; }
+  #dimstack input[type=range] { writing-mode: vertical-lr; width: 16px; height: 96px; margin: 0; }
+
+  /* map chrome */
+  .ol-zoom { top: var(--sp); left: auto; right: var(--sp); padding: 2px; border-radius: var(--radius);
+    background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); }
+  .ol-zoom button { width: 28px; height: 28px; margin: 0; border-radius: 6px; background: transparent;
+    color: var(--text); font: 600 16px/1 system-ui, sans-serif; }
+  .ol-zoom button:hover, .ol-zoom button:focus { background: var(--hover); color: var(--text); }
+  .ol-attribution { bottom: calc(var(--scrub-h) + var(--sp)); right: var(--sp); border-radius: var(--radius);
+    background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line);
+    font: 11px/1.4 system-ui, sans-serif; color: var(--muted); }
+  .ol-attribution ul { margin: 0; padding: 2px 8px; color: var(--muted); font-size: 11px; text-shadow: none; }
+  .ol-attribution a { color: inherit; }
+  .ol-attribution button { background: transparent; color: var(--text); }
+  #readout { position: fixed; left: 0; top: 0; z-index: 8; pointer-events: none; padding: 2px 8px;
+    border-radius: 6px; background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line);
+    font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div id="panel">
-  <h1>__TITLE__</h1>
-  <label for="var">Variable</label>
-  <select id="var"></select>
-  <div id="dims"></div>
-  <label for="opacity">Opacity</label>
-  <input id="opacity" type="range" min="0" max="1" step="0.05" value="1">
-  <label class="row"><input id="osm" type="checkbox"> OSM basemap</label>
-  <div id="legend"></div>
-  <div id="note">Open via the preview server (geozarr-pyramid preview --serve); opening this
-    page directly from disk will not work.</div>
-  <div id="error"></div>
-</div>
+<aside id="sidebar">
+  <button id="sbtoggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <div id="sbhead">
+    <h1>__TITLE__</h1>
+    <button id="infobtn" class="iconbtn" type="button" aria-label="Dataset information" aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none"
+        stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4M8 4.6v.1" stroke="currentColor"
+        stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div id="infopanel" hidden></div>
+  <div id="cards"></div>
+  <div id="sbfoot">
+    <label for="basemap">Basemap</label>
+    <select id="basemap"></select>
+    <div id="note" hidden>Open via the preview server (geozarr-pyramid preview --serve); opening this
+      page directly from disk will not work.</div>
+    <div id="error"></div>
+  </div>
+</aside>
+<div id="dimstack" hidden></div>
+<div id="scrubber" hidden></div>
+<div id="readout" hidden></div>
 <script id="config" type="application/json">__CONFIG_JSON__</script>
 <script type="module">
 import Map from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/Map.js/+esm';
@@ -47,13 +190,20 @@ import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer
 import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/Tile.js/+esm';
 import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/GeoZarr.js/+esm';
 import OSM from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/OSM.js/+esm';
+import XYZ from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/XYZ.js/+esm';
 import {register} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj/proj4.js/+esm';
 import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@__PROJ4_VERSION__/+esm';
 
 const cfg = JSON.parse(document.getElementById('config').textContent);
 const $ = (id) => document.getElementById(id);
 const showError = (e) => { console.error(e); $('error').textContent = String(e && e.message || e); };
-if (location.protocol === 'file:') showError('This page must be served over http (see note).');
+const SIDEBAR_KEY = 'gpm-preview:sidebar-collapsed';
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* storage unavailable */ } },
+};
+if (location.protocol === 'file:') $('note').hidden = false;
+if (store.get(SIDEBAR_KEY) === '1') document.body.classList.add('collapsed');
 
 // The CRS has to be registered before the GeoZarr source resolves it.
 if (cfg.crs.proj4) {
@@ -76,86 +226,428 @@ function colorExpr(v) {
   return expr;
 }
 
-const state = {dims: {}, layer: null, source: null, map: null};
-const cur = () => cfg.variables.find((v) => v.name === $('var').value);
+const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null,
+  map: null, scrub: null, timer: null, optionsOpen: false};
+const cur = () => cfg.variables.find((v) => v.name === state.active);
+const unitsOf = (v) => v.units_display ?? v.units ?? '';
 const dimLabel = (d, i) => (d.labels && d.labels[i] !== undefined ? d.labels[i] : String(i));
+const fmt = (x) => String(+Number(x).toPrecision(6));
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+function h(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+const ICON = {
+  play: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>',
+  pause: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>',
+  prev: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  next: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  gear: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h7M13 4h1M2 12h1M7 12h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="11" cy="4" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+};
+
+// --------------------------------------------------------------------------- sidebar cards
 
 function buildLegend(v) {
-  const el = $('legend');
-  const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
-  const units = v.units ? ` ${v.units}` : '';
+  const el = h('div', 'legend');
   if (v.categorical) {
-    el.innerHTML = v.palette.map(([val, c]) =>
-      `<div><span class="swatch" style="background:${css(c)}"></span>${val}</div>`).join('');
-  } else {
-    const grad = cfg.ramp.map((c, i) => `${css(c)} ${100 * i / (cfg.ramp.length - 1)}%`).join(',');
-    el.innerHTML = `<div class="bar" style="background:linear-gradient(to right,${grad})"></div>` +
-      `<div class="ends"><span>${+v.vmin.toPrecision(4)}</span><span>${units.trim()}</span>` +
-      `<span>${+v.vmax.toPrecision(4)}</span></div>`;
+    for (const [val, c] of v.palette) {
+      const row = h('div', 'cat');
+      const sw = h('span', 'swatch');
+      sw.style.background = css(c);
+      row.append(sw, h('span', '', String(val)));
+      el.append(row);
+    }
+    return el;
+  }
+  const grad = cfg.ramp.map((c, i) => `${css(c)} ${100 * i / (cfg.ramp.length - 1)}%`).join(',');
+  const bar = h('div', 'bar');
+  bar.style.background = `linear-gradient(to right,${grad})`;
+  const ticks = h('div', 'ticks');
+  const values = v.ticks && v.ticks.length ? v.ticks : [v.vmin, v.vmax];
+  const units = unitsOf(v);
+  values.forEach((t, i) => {
+    const p = clamp(100 * (t - v.vmin) / (v.vmax - v.vmin), 0, 100);
+    const mark = h('span', 'tick');
+    mark.style.left = `${p}%`;
+    const last = i === values.length - 1;
+    const lab = h('span', 'tlabel', fmt(t) + (last && units ? ` ${units}` : ''));
+    lab.style.left = `${p}%`;
+    // keep the end labels inside the bar
+    lab.style.transform = last && p > 50 ? 'translateX(-100%)' : (p < 6 ? 'none' : 'translateX(-50%)');
+    ticks.append(mark, lab);
+  });
+  el.append(bar, ticks);
+  return el;
+}
+
+const cards = new window.Map();
+
+function buildCards() {
+  const box = $('cards');
+  for (const v of cfg.variables) {
+    const card = h('div', 'card');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    const top = h('div', 'top');
+    top.append(h('div', 'name', v.display_name || v.name));
+    const gear = h('button', 'iconbtn gear');
+    gear.type = 'button';
+    gear.innerHTML = ICON.gear;
+    gear.setAttribute('aria-label', 'Layer options');
+    gear.setAttribute('aria-expanded', 'false');
+    top.append(gear);
+    card.append(top);
+    const meta = [unitsOf(v), ...v.dims].filter(Boolean).join(' · ');
+    if (meta) card.append(h('div', 'meta', meta));
+    card.append(buildLegend(v));
+    const opts = h('div', 'opts');
+    const slider = h('input');
+    slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = state.opacity;
+    slider.setAttribute('aria-label', 'Opacity');
+    opts.append(h('span', '', 'Opacity'), slider);
+    card.append(opts);
+    card.addEventListener('click', () => setActive(v.name));
+    card.addEventListener('keydown', (e) => {
+      if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setActive(v.name); }
+    });
+    gear.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.optionsOpen = !state.optionsOpen;
+      refreshCards();
+    });
+    slider.addEventListener('click', (e) => e.stopPropagation());
+    slider.addEventListener('input', () => {
+      state.opacity = +slider.value;
+      state.layer?.setOpacity(state.opacity);
+      for (const c of cards.values()) c.slider.value = slider.value;
+    });
+    cards.set(v.name, {el: card, gear, slider});
+    box.append(card);
   }
 }
 
-function buildDims(v) {
-  const box = $('dims');
-  box.innerHTML = '';
-  for (const name of v.dims) {
-    const d = cfg.dims[name];
-    if (state.dims[name] === undefined) state.dims[name] = 0;
-    const lab = document.createElement('label');
-    const out = document.createElement('span');
-    lab.append(`${name}: `, out);
-    const inp = document.createElement('input');
-    inp.type = 'range'; inp.min = 0; inp.max = d.size - 1; inp.step = 1;
-    inp.value = Math.min(state.dims[name], d.size - 1);
-    out.textContent = dimLabel(d, +inp.value);
-    inp.addEventListener('input', () => {
-      state.dims[name] = +inp.value;
-      out.textContent = dimLabel(d, +inp.value);
-      if (state.source) state.source.updateDimensions({[name]: +inp.value});
-    });
-    box.append(lab, inp);
+function refreshCards() {
+  for (const [name, c] of cards) {
+    const active = name === state.active;
+    c.el.classList.toggle('active', active);
+    c.el.classList.toggle('open', active && state.optionsOpen);
+    c.el.setAttribute('aria-pressed', String(active));
+    c.gear.setAttribute('aria-expanded', String(active && state.optionsOpen));
   }
 }
+
+function buildInfo() {
+  const box = $('infopanel');
+  const row = (k, v) => { const d = h('div'); d.append(h('b', '', `${k}: `), v); box.append(d); };
+  row('CRS', cfg.crs.name);
+  if (cfg.bbox) row('Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', '));
+  $('infobtn').addEventListener('click', () => {
+    box.hidden = !box.hidden;
+    $('infobtn').setAttribute('aria-expanded', String(!box.hidden));
+  });
+}
+
+function initSidebar() {
+  $('sbtoggle').addEventListener('click', () => {
+    const collapsed = document.body.classList.toggle('collapsed');
+    store.set(SIDEBAR_KEY, collapsed ? '1' : '0');
+    $('sbtoggle').setAttribute('aria-expanded', String(!collapsed));
+    $('sbtoggle').setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    state.map?.updateSize();
+  });
+  const collapsed = document.body.classList.contains('collapsed');
+  $('sbtoggle').setAttribute('aria-expanded', String(!collapsed));
+  $('sbtoggle').setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+}
+
+// --------------------------------------------------------------------------- time scrubber
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function stepPositions(d) {
+  const n = d.size;
+  if (d.iso && d.iso.length === n && n > 1) {
+    const t = d.iso.map((s) => Date.parse(s));
+    if (t.every(Number.isFinite)) {
+      const lo = Math.min(...t), hi = Math.max(...t);
+      if (hi > lo) return {pos: t.map((x) => (x - lo) / (hi - lo)), timed: true, lo, hi};
+    }
+  }
+  return {pos: Array.from({length: n}, (_, i) => (n > 1 ? i / (n - 1) : 0)), timed: false};
+}
+
+function dateTicks(lo, hi) {
+  const out = [];
+  const spanDays = (hi - lo) / 864e5;
+  const first = new Date(lo);
+  if (spanDays > 730) {
+    const years = spanDays / 365.25;
+    const step = [1, 2, 5, 10, 20, 50, 100].find((s) => years / s <= 10) || 100;
+    let y = first.getUTCFullYear();
+    if (Date.UTC(y, 0, 1) < lo) y += 1;
+    y = Math.ceil(y / step) * step;
+    for (; Date.UTC(y, 0, 1) <= hi; y += step) out.push({t: Date.UTC(y, 0, 1), text: String(y)});
+  } else {
+    const step = [1, 2, 3, 6].find((s) => spanDays / 30.4 / s <= 12) || 6;
+    const y = first.getUTCFullYear();
+    let m = first.getUTCMonth();
+    if (Date.UTC(y, m, 1) < lo) m += 1;
+    for (; Date.UTC(y, m, 1) <= hi; m += 1) {
+      if ((y * 12 + m) % step) continue;
+      const mm = m % 12;
+      out.push({t: Date.UTC(y, m, 1), text: MONTHS[mm] + (mm === 0 || !out.length ? ` ${y + Math.floor(m / 12)}` : '')});
+    }
+  }
+  return out;
+}
+
+function indexTicks(d, pos) {
+  const n = d.size;
+  const raw = Math.max(1, n / 8);
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  const out = [];
+  for (let i = 0; i < n; i += step) out.push({p: pos[i], text: dimLabel(d, i)});
+  return out;
+}
+
+function stopPlay() {
+  if (state.timer) clearInterval(state.timer);
+  state.timer = null;
+  if (state.scrub) { state.scrub.playBtn.innerHTML = ICON.play; state.scrub.playBtn.setAttribute('aria-label', 'Play'); }
+}
+
+function setDim(name, i) {
+  state.dims[name] = i;
+  if (state.source) state.source.updateDimensions({[name]: i});
+}
+
+function buildScrubber(v) {
+  stopPlay();
+  state.scrub = null;
+  const bar = $('scrubber'), stack = $('dimstack');
+  bar.innerHTML = ''; stack.innerHTML = '';
+  bar.hidden = v.dims.length === 0;
+  stack.hidden = v.dims.length < 2;
+  document.body.classList.toggle('has-scrub', v.dims.length > 0);
+  if (!v.dims.length) return;
+  for (const name of v.dims) {
+    const size = cfg.dims[name].size;
+    state.dims[name] = clamp(state.dims[name] || 0, 0, size - 1);
+  }
+
+  // main scrubber: first extra dim
+  const name = v.dims[0];
+  const d = cfg.dims[name];
+  const n = d.size;
+  const {pos, timed, lo, hi} = stepPositions(d);
+  const ctl = h('div', 'ctl');
+  const mkBtn = (icon, label) => {
+    const b = h('button'); b.type = 'button'; b.innerHTML = icon; b.setAttribute('aria-label', label); return b;
+  };
+  const playBtn = mkBtn(ICON.play, 'Play'), prevBtn = mkBtn(ICON.prev, 'Previous step'),
+    nextBtn = mkBtn(ICON.next, 'Next step');
+  ctl.append(prevBtn, playBtn, nextBtn);
+  const track = h('div', 'track');
+  track.append(h('div', 'rail'));
+  const addMark = (p, cls) => { const m = h('div', `mark ${cls}`); m.style.left = `${100 * p}%`; track.append(m); };
+  if (n <= 60) pos.forEach((p) => addMark(p, 'minor'));
+  let major = [];
+  if (timed) major = dateTicks(lo, hi).map((k) => ({p: (k.t - lo) / (hi - lo), text: k.text}));
+  if (major.length < 2) major = indexTicks(d, pos);
+  const labels = [];
+  for (const k of major) {
+    addMark(k.p, 'major');
+    const lab = h('div', 'tlabel', String(k.text));
+    lab.style.left = `${100 * k.p}%`;
+    track.append(lab);
+    labels.push(lab);
+  }
+  const handle = h('div', 'handle');
+  handle.tabIndex = 0;
+  handle.setAttribute('role', 'slider');
+  handle.setAttribute('aria-label', name);
+  handle.setAttribute('aria-valuemin', '0');
+  handle.setAttribute('aria-valuemax', String(n - 1));
+  const bubble = h('div', 'bubble');
+  track.append(handle, bubble);
+  bar.append(ctl, h('span', 'dname', name), track);
+
+  const render = () => {
+    const i = state.dims[name];
+    handle.style.left = bubble.style.left = `${100 * pos[i]}%`;
+    bubble.textContent = String(dimLabel(d, i));
+    handle.setAttribute('aria-valuenow', String(i));
+    handle.setAttribute('aria-valuetext', String(dimLabel(d, i)));
+  };
+  const setStep = (i) => {
+    i = clamp(i, 0, n - 1);
+    if (i !== state.dims[name]) setDim(name, i);
+    render();
+  };
+  const step = (delta) => setStep(state.dims[name] + delta);
+  const nearest = (clientX) => {
+    const r = track.getBoundingClientRect();
+    const x = r.width ? clamp((clientX - r.left) / r.width, 0, 1) : 0;
+    let best = 0;
+    for (let i = 1; i < n; i++) if (Math.abs(pos[i] - x) < Math.abs(pos[best] - x)) best = i;
+    return best;
+  };
+  let dragging = false;
+  track.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    track.setPointerCapture(e.pointerId);
+    handle.style.cursor = 'grabbing';
+    stopPlay();
+    setStep(nearest(e.clientX));
+  });
+  track.addEventListener('pointermove', (e) => { if (dragging) setStep(nearest(e.clientX)); });
+  const end = () => { dragging = false; handle.style.cursor = ''; };
+  track.addEventListener('pointerup', end);
+  track.addEventListener('pointercancel', end);
+  prevBtn.addEventListener('click', () => { stopPlay(); step(-1); });
+  nextBtn.addEventListener('click', () => { stopPlay(); step(1); });
+  playBtn.addEventListener('click', () => {
+    if (state.timer) return stopPlay();
+    playBtn.innerHTML = ICON.pause;
+    playBtn.setAttribute('aria-label', 'Pause');
+    state.timer = setInterval(() => setStep((state.dims[name] + 1) % n), 800);
+  });
+
+  // hide tick labels that would collide with the previous one
+  const layoutLabels = () => {
+    let right = -Infinity;
+    for (const lab of labels) {
+      lab.style.visibility = 'visible';
+      const r = lab.getBoundingClientRect();
+      if (r.left < right + 6) lab.style.visibility = 'hidden';
+      else right = r.right;
+    }
+  };
+  if (window.ResizeObserver) new ResizeObserver(layoutLabels).observe(track);
+  else window.addEventListener('resize', layoutLabels);
+  state.scrub = {name, step, playBtn};
+  render();
+  layoutLabels();
+
+  // further dims (e.g. depth): compact vertical sliders
+  for (const extra of v.dims.slice(1)) {
+    const ed = cfg.dims[extra];
+    const item = h('div', 'dim');
+    const val = h('span', 'val', String(dimLabel(ed, state.dims[extra])));
+    const inp = h('input');
+    inp.type = 'range'; inp.min = 0; inp.max = ed.size - 1; inp.step = 1; inp.value = state.dims[extra];
+    inp.setAttribute('orient', 'vertical');
+    inp.setAttribute('aria-label', extra);
+    inp.addEventListener('input', () => { setDim(extra, +inp.value); val.textContent = String(dimLabel(ed, +inp.value)); });
+    item.append(h('span', 'lab', extra), inp, val);
+    stack.append(item);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!state.scrub || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  if (e.target && e.target.closest && e.target.closest('input, select, textarea, [contenteditable]')) return;
+  e.preventDefault();
+  stopPlay();
+  state.scrub.step(e.key === 'ArrowRight' ? 1 : -1);
+});
+
+// --------------------------------------------------------------------------- map
 
 function makeLayer() {
   const v = cur();
   const dimensions = {};
-  for (const n of v.dims) dimensions[n] = state.dims[n] || 0;
+  for (const n of v.dims) dimensions[n] = clamp(state.dims[n] || 0, 0, cfg.dims[n].size - 1);
   const opts = {url: storeUrl, bands: [v.name], transition: 0};
   if (cfg.crs.projection) opts.projection = cfg.crs.projection;
   if (v.dims.length) opts.dimensions = dimensions;
   const source = new GeoZarr(opts);
   source.addEventListener?.('error', showError);
   return {source, layer: new WebGLTileLayer({
-    source, style: {color: colorExpr(v)}, opacity: +$('opacity').value})};
+    source, style: {color: colorExpr(v)}, opacity: state.opacity})};
+}
+
+function setActive(name) {
+  if (name === state.active) return;
+  state.active = name;
+  refreshCards();
+  buildScrubber(cur());
+  const next = makeLayer();
+  state.map.getLayers().remove(state.layer);
+  state.layer.dispose?.();
+  state.map.getLayers().push(next.layer);
+  state.layer = next.layer; state.source = next.source;
+  $('readout').hidden = true;
+}
+
+function initBasemap() {
+  const sel = $('basemap');
+  const layers = {};
+  const options = cfg.basemap_default ? [['light', 'Light'], ['dark', 'Dark'], ['osm', 'OSM'], ['none', 'None']] : [['none', 'None']];
+  for (const [k, label] of options) sel.add(new Option(label, k));
+  if (cfg.basemap_default) {
+    const carto = (style) => new TileLayer({source: new XYZ({
+      url: `https://{a-d}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`,
+      attributions: '\u00a9 OpenStreetMap contributors \u00a9 CARTO', maxZoom: 20}), visible: false});
+    layers.light = carto('light_nolabels');
+    layers.dark = carto('dark_nolabels');
+    layers.osm = new TileLayer({source: new OSM(), visible: false});
+  } else {
+    sel.disabled = true;
+  }
+  const apply = () => { for (const [k, l] of Object.entries(layers)) l.setVisible(sel.value === k); };
+  const prefersDark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  sel.value = cfg.basemap_default ? (prefersDark ? 'dark' : 'light') : 'none';
+  sel.addEventListener('change', apply);
+  apply();
+  return Object.values(layers);
+}
+
+function initReadout(map) {
+  const ro = $('readout');
+  const hide = () => { ro.hidden = true; };
+  map.on('pointermove', (e) => {
+    if (e.dragging || !state.layer) return hide();
+    let val = null;
+    try {
+      const data = state.layer.getData(e.pixel);
+      if (data && data.length) val = data[0];
+    } catch (_) { /* layer not rendered yet */ }
+    if (val === null || !Number.isFinite(val)) return hide();
+    const v = cur();
+    const u = unitsOf(v);
+    ro.textContent = v.categorical ? String(val) : `${+Number(val).toPrecision(4)}${u ? ` ${u}` : ''}`;
+    ro.hidden = false;
+    const o = e.originalEvent;
+    const w = ro.offsetWidth, hgt = ro.offsetHeight;
+    const x = o.clientX + 14 + w > innerWidth - 8 ? o.clientX - w - 14 : o.clientX + 14;
+    const y = o.clientY + 14 + hgt > innerHeight - 8 ? o.clientY - hgt - 14 : o.clientY + 14;
+    ro.style.transform = `translate(${x}px,${y}px)`;
+  });
+  map.getViewport().addEventListener('pointerleave', hide);
 }
 
 function init() {
-  const first = cfg.variables[0];
-  for (const v of cfg.variables) $('var').add(new Option(v.name, v.name));
-  $('osm').checked = cfg.basemap_default;
-  $('var').value = first.name;
-  buildDims(first);
-  buildLegend(first);
+  initSidebar();
+  buildInfo();
+  buildCards();
+  refreshCards();
+  buildScrubber(cur());
+  const basemaps = initBasemap();
   const {source, layer} = makeLayer();
   state.source = source; state.layer = layer;
   // Pass the promise itself: Map's `view` option accepts Promise<ViewOptions> and resolves it.
   const view = getView(source, withLowerResolutions(1), withHigherResolutions(2),
     withExtentCenter(), withZoom(2));
   view.catch(showError);
-  const osm = new TileLayer({source: new OSM(), visible: $('osm').checked});
-  state.map = new Map({target: 'map', layers: [osm, layer], view});
-  $('osm').addEventListener('change', () => osm.setVisible($('osm').checked));
-  $('opacity').addEventListener('input', () => state.layer.setOpacity(+$('opacity').value));
-  $('var').addEventListener('change', () => {
-    const v = cur();
-    buildDims(v); buildLegend(v);
-    const next = makeLayer();
-    state.map.getLayers().remove(state.layer);
-    state.layer.dispose?.();
-    state.map.getLayers().push(next.layer);
-    state.layer = next.layer; state.source = next.source;
-  });
+  state.map = new Map({target: 'map', layers: [...basemaps, layer], view});
+  initReadout(state.map);
 }
 try { init(); } catch (e) { showError(e); }
 </script>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import html
 import json
+import math
 import os
 import posixpath
 import re
@@ -97,6 +98,78 @@ def _clean(x: float) -> float:
     return float(f"{float(x):.10g}")
 
 
+# --------------------------------------------------------------------------- display helpers
+
+_SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+_SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+_UNIT_ALIASES = {
+    "uatm": "µatm",
+    "degc": "°C",
+    "degree_celsius": "°C",
+    "celsius": "°C",
+}
+
+
+def _display_name(long_name: str, name: str) -> str:
+    """long_name with simple LaTeX made readable; the variable name when nothing is left."""
+    s = str(long_name or "")
+    s = re.sub(r"\\(?:mathrm|mathit|mathbf|text|rm)\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"\\Delta\s*", "Δ", s).replace("$", "")
+    s = re.sub(r"_\{(\d+)\}", lambda m: m.group(1).translate(_SUB), s)
+    s = re.sub(r"_(\d)", lambda m: m.group(1).translate(_SUB), s)
+    s = re.sub(r"\^\{(\d+)\}", lambda m: m.group(1).translate(_SUP), s)
+    s = re.sub(r"\^(\d)", lambda m: m.group(1).translate(_SUP), s)
+    s = " ".join(s.split())
+    return s or name
+
+
+def _units_display(units: str) -> str:
+    """Typographic spelling of common units ("uatm" -> "µatm", "m yr-1" -> "m yr⁻¹")."""
+    u = str(units or "").strip()
+    alias = _UNIT_ALIASES.get(u.lower())
+    if alias:
+        return alias
+    return re.sub(r"(?<=[A-Za-z])-(\d)", lambda m: "⁻" + m.group(1).translate(_SUP), u)
+
+
+def _nice_ticks(vmin: float, vmax: float) -> list[float]:
+    """4-6 tick values on 1/2/5 x 10^n steps inside [vmin, vmax]."""
+    span = vmax - vmin
+    if not (span > 0 and math.isfinite(span)):
+        return [_clean(vmin)]
+    base = math.floor(math.log10(span))
+    best: tuple[float, list[float]] | None = None
+    for exp in range(base - 2, base + 2):
+        for mant in (1, 2, 5):
+            step = mant * 10.0**exp
+            k0, k1 = math.ceil(vmin / step - 1e-9), math.floor(vmax / step + 1e-9)
+            n = k1 - k0 + 1
+            if not 4 <= n <= 6:
+                continue
+            score = abs(n - 5) - step * 1e-12 / span  # closest to 5, then the coarser step
+            if best is None or score < best[0]:
+                best = (score, [_clean(k * step) for k in range(k0, k1 + 1)])
+    if best is None:  # no 1/2/5 step gives 4-6 ticks; fall back to evenly spaced ones
+        return [_clean(vmin + span * i / 4) for i in range(5)]
+    return best[1]
+
+
+def _iso(values: np.ndarray) -> list[str] | None:
+    """ISO-8601 (UTC) timestamps for datetime-like coordinates, else None."""
+    if values.size > _MAX_LABELS or values.size == 0:
+        return None
+    try:
+        if np.issubdtype(values.dtype, np.datetime64):
+            if np.isnat(values).any():
+                return None
+            return [str(np.datetime_as_string(v, unit="s")) + "Z" for v in values]
+        if values.dtype == object and hasattr(values.flat[0], "isoformat"):  # cftime
+            return [str(v.isoformat())[:19] + "Z" for v in values]
+    except Exception:
+        return None
+    return None
+
+
 def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, Any]:
     dims = list(arr.metadata.dimension_names or ())
     extra = [d for d in dims if d not in sdims]
@@ -121,6 +194,8 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
         "units": str(attrs.get("units", "")),
         "long_name": str(attrs.get("long_name", "")),
     }
+    cfg["display_name"] = _display_name(cfg["long_name"], name)
+    cfg["units_display"] = _units_display(cfg["units"])
     if categorical:
         uniq = np.unique(valid)[:_MAX_CATEGORIES]
         cfg["values"] = [_clean(u) for u in uniq]
@@ -129,6 +204,7 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
         ]
         cfg["vmin"] = _clean(uniq[0]) if uniq.size else 0.0
         cfg["vmax"] = _clean(uniq[-1]) if uniq.size else 1.0
+        cfg["ticks"] = []
     else:
         if valid.size:
             vmin, vmax = (float(v) for v in np.nanpercentile(valid, [2, 98]))
@@ -137,6 +213,7 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
         if vmax <= vmin:
             vmax = vmin + 1.0
         cfg["vmin"], cfg["vmax"] = _clean(vmin), _clean(vmax)
+        cfg["ticks"] = _nice_ticks(cfg["vmin"], cfg["vmax"])
     return cfg
 
 
@@ -172,7 +249,8 @@ def read_config(store: str | os.PathLike) -> dict[str, Any]:
         for d in v["dims"]:
             if d not in dims:
                 labels = _labels(ds[d].values) if d in ds.coords else None
-                dims[d] = {"size": int(ds.sizes[d]), "labels": labels}
+                iso = _iso(ds[d].values) if d in ds.coords else None
+                dims[d] = {"size": int(ds.sizes[d]), "labels": labels, "iso": iso}
     if not variables:
         raise ValueError(f"No plottable variables found in level {coarsest} of {str(store)!r}.")
     crs = _crs_config(attrs)
