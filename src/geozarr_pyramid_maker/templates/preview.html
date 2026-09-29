@@ -86,10 +86,15 @@
   .iconbtn { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
     border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
   .iconbtn svg { width: 16px; height: 16px; }
-  #infopanel { margin: 4px var(--sp) 0; padding: var(--sp) 12px; border-radius: var(--radius);
+  #settingspanel { margin: 4px var(--sp) 0; padding: var(--sp) 12px; border-radius: var(--radius);
     background: var(--card); box-shadow: var(--shadow); font-size: 12px; color: var(--muted); }
-  #infopanel b { color: var(--text); font-weight: 600; }
-  #infopanel div + div { margin-top: 2px; }
+  #settingspanel b { color: var(--text); font-weight: 600; }
+  #settingspanel div + div { margin-top: 2px; }
+  #s3row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+  #s3row[hidden] { display: none; }
+  #endpoint { padding: 3px 6px; border: 1px solid var(--card-line); border-radius: 4px;
+    background: transparent; color: var(--text); font: inherit; }
+  #endpoint:focus { border-color: #4a90e2; outline: none; }
   #cards { flex: 1; overflow: auto; padding: var(--sp); display: flex; flex-direction: column; gap: var(--sp); }
   .card { padding: 12px; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow);
     border: 1px solid var(--card-line); cursor: pointer; }
@@ -202,14 +207,22 @@
     <h1><input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
       aria-label="Store path or URL (press Enter to open)"
       title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open."></h1>
-    <button id="infobtn" class="iconbtn" type="button" aria-label="Dataset information" aria-expanded="false">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none"
-        stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4M8 4.6v.1" stroke="currentColor"
-        stroke-width="1.6" stroke-linecap="round"/></svg>
+    <button id="settingsbtn" class="iconbtn" type="button" aria-label="Settings" aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" fill="none"
+        stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
+        fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
     </button>
   </div>
   <div id="storeerr" role="alert" hidden></div>
-  <div id="infopanel" hidden></div>
+  <div id="settingspanel" hidden>
+    <div id="s3row" hidden>
+      <b><label for="endpoint">S3 endpoint URL</label></b>
+      <input id="endpoint" type="text" spellcheck="false" autocomplete="off"
+        placeholder="https://os.zhdk.cloud.switch.ch"
+        title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
+    </div>
+    <div id="inforows"></div>
+  </div>
   <div id="cards"></div>
   <div id="sbfoot">
     <label for="basemap">Basemap</label>
@@ -256,7 +269,7 @@ function showStoreError(e) {
   box.innerHTML = `<div class="msg">${codeify(e.message)}</div>` + (e.hint ? `<div class="hint">${codeify(e.hint)}</div>` : '');
   box.hidden = false;
 }
-async function openStore(src) {
+async function openStore(src, endpoint) {
   if (location.protocol === 'file:') {
     throw storeError('Opening other stores needs the preview server.',
       'Run `geozarr-pyramid preview STORE --serve` and use the page it serves.', 'no_server');
@@ -264,7 +277,7 @@ async function openStore(src) {
   let res;
   try {
     // api_base: the server's URL prefix (set when the server renders the page, e.g. on RenkuLab)
-    res = await fetch(new URL(`${cfg0.api_base || '/'}api/open?store=${encodeURIComponent(src)}`, location.href));
+    res = await fetch(new URL(`${cfg0.api_base || '/'}api/open?store=${encodeURIComponent(src)}${endpoint ? `&endpoint=${encodeURIComponent(endpoint)}` : ''}`, location.href));
   } catch (err) {
     throw storeError('The preview server is not reachable.',
       'Is `geozarr-pyramid preview --serve` still running?', 'no_server');
@@ -294,13 +307,14 @@ const cfg0 = cfg;  // as rendered: keeps api_base when another store's config re
 cfg.source = cfg.source || cfg.store_url;
 let startupError = null;
 const wanted = params.get('store');
+const wantedEndpoint = params.get('endpoint') || '';
 if (wanted === '' && cfg.variables && cfg.variables.length) {
   // `?store=` (empty): the blank viewer, even on a page generated for one store.
   cfg = {...cfg, title: '', source: '', store_url: '', variables: [], dims: {}, global: true,
     basemap_default: true, bbox: [-180, -90, 180, 90],
     crs: {code: 'EPSG:4326', name: 'EPSG:4326', proj4: null, projection: null}};
-} else if (wanted && wanted !== cfg.source) {
-  try { cfg = await openStore(wanted); } catch (e) { startupError = e; }
+} else if (wanted && (wanted !== cfg.source || wantedEndpoint !== (cfg.endpoint || ''))) {
+  try { cfg = await openStore(wanted, wantedEndpoint); } catch (e) { startupError = e; }
 }
 // Blank viewer: no store loaded yet (no variables). Global EPSG:4326 view with a basemap only.
 const blank = !(cfg.variables && cfg.variables.length);
@@ -308,32 +322,47 @@ document.title = blank ? 'GeoZarr viewer' : `${cfg.title} | GeoZarr preview`;
 
 function initStorePicker() {
   const inp = $('storepath');
+  const ep = $('endpoint');
   inp.value = startupError ? wanted : cfg.source;
+  ep.value = startupError ? wantedEndpoint : (cfg.endpoint || '');
   inp.placeholder = 'Enter a store path or URL…';
+  // the endpoint field only matters for s3:// stores
+  const isS3 = () => /^s3:\/\//i.test(inp.value.trim());
+  const syncEndpointRow = () => { $('s3row').hidden = !isS3(); };
+  syncEndpointRow();
+  inp.addEventListener('input', syncEndpointRow);
   if (blank && !startupError) inp.focus();
   if (startupError) showStoreError(startupError);
-  inp.addEventListener('keydown', async (e) => {
-    if (e.key === 'Escape') { inp.value = cfg.source; showStoreError(null); inp.blur(); return; }
-    if (e.key !== 'Enter') return;
+  async function submit() {
     const src = inp.value.trim();
     if (!src) {  // cleared: back to the blank viewer
       if (blank) { showStoreError(null); return; }
       location.assign(`${location.pathname}?store=`);
       return;
     }
-    if (src === cfg.source && !startupError) { showStoreError(null); return; }
-    inp.classList.add('busy'); inp.disabled = true;
+    const endpoint = isS3() ? ep.value.trim() : '';
+    if (src === cfg.source && endpoint === (cfg.endpoint || '') && !startupError) { showStoreError(null); return; }
+    inp.classList.add('busy'); inp.disabled = true; ep.disabled = true;
     try {
-      await openStore(src);
+      await openStore(src, endpoint);
       const url = new URL(location.pathname, location.href);  // new store: drop the old settings
       url.searchParams.set('store', src);
+      if (endpoint) url.searchParams.set('endpoint', endpoint);
       location.assign(url.href);
     } catch (err) {
       showStoreError(err);
     } finally {
-      inp.classList.remove('busy'); inp.disabled = false; inp.focus();
+      inp.classList.remove('busy'); inp.disabled = false; ep.disabled = false; inp.focus();
     }
+  }
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      inp.value = cfg.source; ep.value = cfg.endpoint || ''; syncEndpointRow();
+      showStoreError(null); inp.blur(); return;
+    }
+    if (e.key === 'Enter') submit();
   });
+  ep.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 }
 const showError = (e) => { console.error(e); $('error').textContent = String(e && e.message || e); };
 const SIDEBAR_KEY = 'gpm-preview:sidebar-collapsed';
@@ -468,6 +497,7 @@ function syncUrl() {
       const v = cur();
       const st = styleOf(v);
       q.set('store', cfg.source);
+      if (cfg.endpoint && /^s3:\/\//i.test(cfg.source)) q.set('endpoint', cfg.endpoint);
       q.set('var', v.name);
       for (const d of v.dims) q.set(d, dimToParam(d, state.dims[d] || 0));
       q.set('cmap', st.cmap);
@@ -707,14 +737,15 @@ function refreshCards() {
 }
 
 function buildInfo() {
-  const box = $('infopanel');
+  const box = $('inforows');
   const row = (k, v) => { const d = h('div'); d.append(h('b', '', `${k}: `), v); box.append(d); };
   if (blank) row('Store', 'none loaded; type a path or URL above and press Enter');
   row('CRS', cfg.crs.name);
   if (cfg.bbox) row('Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', '));
-  $('infobtn').addEventListener('click', () => {
-    box.hidden = !box.hidden;
-    $('infobtn').setAttribute('aria-expanded', String(!box.hidden));
+  const panel = $('settingspanel');
+  $('settingsbtn').addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    $('settingsbtn').setAttribute('aria-expanded', String(!panel.hidden));
   });
 }
 

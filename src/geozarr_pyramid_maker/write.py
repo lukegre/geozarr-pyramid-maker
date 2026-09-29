@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 import warnings
@@ -73,6 +74,31 @@ def _resolve_store(store: Any, storage_options: Mapping[str, Any] | None = None)
     return zarr.storage.FsspecStore.from_url(
         store, storage_options=dict(storage_options or {}), read_only=False
     )
+
+
+def _s3_endpoint_options(endpoint: str) -> dict[str, Any]:
+    """storage_options for a custom S3 endpoint, for the backend _resolve_store picks.
+
+    Reads are unsigned when no AWS credentials are configured in the environment; otherwise
+    obstore would probe the instance-metadata service and fail.
+    """
+    anonymous = not any(
+        os.environ.get(k)
+        for k in ("AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_WEB_IDENTITY_TOKEN_FILE")
+    )
+    try:
+        import obstore.store  # noqa: F401
+    except ImportError:
+        opts: dict[str, Any] = {"endpoint_url": endpoint}  # s3fs / fsspec
+        if anonymous:
+            opts["anon"] = True
+        return opts
+    opts = {"endpoint": endpoint}
+    if endpoint.lower().startswith("http://"):
+        opts["allow_http"] = True
+    if anonymous:
+        opts["skip_signature"] = True
+    return opts
 
 
 def _store_has_data(store: zarr.abc.store.Store) -> bool:
