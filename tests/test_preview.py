@@ -1050,3 +1050,44 @@ def test_relay_serves_real_switch_store(tmp_path, monkeypatch):
     url = pv._relay(srv, src, pv._storage_options(src, endpoint))
     code, _, body = _raw(tmp_path, f"GET {url}zarr.json HTTP/1.1\r\nHost: x\r\n\r\n".encode(), srv)
     assert code == 200 and json.loads(body)["zarr_format"] == 3
+
+
+# --------------------------------------------------------------------------- non-listable stores
+
+
+def _unlistable(path):
+    """A LocalStore that cannot list, like a plain HTTP store (only consolidated metadata helps)."""
+    from zarr.storage import LocalStore
+
+    class NoListStore(LocalStore):
+        supports_listing = False
+
+        def list(self):
+            raise NotImplementedError("no listing over HTTP")
+
+        def list_prefix(self, prefix):
+            raise NotImplementedError("no listing over HTTP")
+
+        def list_dir(self, prefix):
+            raise NotImplementedError("no listing over HTTP")
+
+    return NoListStore(path, read_only=True)
+
+
+def test_read_config_does_not_need_listing(multi_var, tmp_path, monkeypatch):
+    from geozarr_pyramid_maker import write
+
+    store = _pyramid(multi_var, tmp_path)
+    expected = pv.read_config(store)
+    assert expected["dims"]["time"]["iso"]  # time decoded, so the comparison means something
+    monkeypatch.setattr(write, "_resolve_store", lambda s, opts=None: _unlistable(str(s)))
+    assert pv.read_config(store) == expected
+
+
+@pytest.mark.network
+def test_read_config_https_store_without_listing():
+    cfg = pv.read_config(
+        "https://os.zhdk.cloud.switch.ch/spi-pamir-public/test/oceansoda_dfco2.zarr"
+    )
+    assert "dfco2" in [v["name"] for v in cfg["variables"]]
+    assert "time" in cfg["dims"]

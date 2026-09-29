@@ -350,6 +350,20 @@ def _is_global(attrs: dict[str, Any]) -> bool:
     return abs((bbox[2] - bbox[0]) - 360.0) < 1e-6
 
 
+def _coord_values(group: zarr.Group, name: str) -> np.ndarray | None:
+    """CF-decoded values of the 1-D coordinate array ``name`` in ``group``, or None."""
+    try:
+        arr = group[name]
+    except KeyError:
+        return None
+    if not isinstance(arr, zarr.Array) or arr.ndim != 1:
+        return None
+    var = xr.Variable(
+        list(arr.metadata.dimension_names or (name,)), np.asarray(arr[:]), dict(arr.attrs)
+    )
+    return xr.conventions.decode_cf_variable(name, var).values
+
+
 def read_config(
     store: str | os.PathLike, storage_options: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -369,7 +383,6 @@ def read_config(
     group = root[coarsest]
     sdims = list(dict(group.attrs).get("spatial:dimensions") or [])
     variables, dims = [], {}
-    ds = xr.open_zarr(zstore, group=coarsest, consolidated=False)
     order = [str(n) for n in attrs.get(VARIABLES_ATTR) or []]
     # zarr lists arrays alphabetically; keep the source order (unknown names go last)
     arrays = sorted(
@@ -383,9 +396,13 @@ def read_config(
         variables.append(v)
         for d in v["dims"]:
             if d not in dims:
-                labels = _labels(ds[d].values) if d in ds.coords else None
-                iso = _iso(ds[d].values) if d in ds.coords else None
-                dims[d] = {"size": int(ds.sizes[d]), "labels": labels, "iso": iso}
+                # sizes and coordinates come from the (consolidated) group members, never from
+                # listing the level: plain HTTP stores cannot list directories
+                size = int(arr.shape[dn.index(d)])
+                values = _coord_values(group, d)
+                labels = _labels(values) if values is not None else None
+                iso = _iso(values) if values is not None else None
+                dims[d] = {"size": size, "labels": labels, "iso": iso}
     if not variables:
         raise ValueError(f"No plottable variables found in level {coarsest} of {str(store)!r}.")
     crs = _crs_config(attrs)
@@ -574,7 +591,10 @@ def check_store(
     attrs = dict(root.attrs)
     layout = (attrs.get("multiscales") or {}).get("layout")
     if not layout:
-        levels = [k for k, _ in root.groups()]
+        try:
+            levels = [k for k, _ in root.groups()]
+        except Exception:  # store cannot list (plain HTTP without consolidated metadata)
+            levels = []
         extra = f" It has groups {levels[:5]} but no multiscales layout." if levels else ""
         raise StoreError(
             "not_pyramid",
