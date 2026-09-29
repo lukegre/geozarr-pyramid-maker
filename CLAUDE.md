@@ -21,7 +21,8 @@ The main session (Opus) plans, breaks work into tasks, reviews diffs and makes d
 
 Escalation ladder: Sonnet:medium → Sonnet:high → Opus:low → Opus:medium. The Agent tool has no effort parameter, so
 state the effort level in the prompt. Each coding handoff includes the relevant PLAN/DECISIONS sections, the files to touch
-and the target tests, plus the rule: TDD (red → green), and run `uv run pytest` and `uv run ruff check` before reporting.
+and the target tests, plus the rule: TDD (red → green), and run `.venv/bin/python -m pytest`, `.venv/bin/ruff check` and
+`.venv/bin/ruff format --check` before reporting (not `uv run`; see *uv and the sandbox*).
 
 ## Git workflow
 - Every piece of work gets its own **feature-named branch** (e.g. `feat/m1-detect-plan`, `fix/shard-alignment`, `docs/readme`).
@@ -33,6 +34,16 @@ and the target tests, plus the rule: TDD (red → green), and run `uv run pytest
 
 ## Conventions
 - Package manager: **uv** only (`uv add`, `uv run`, `uv sync`). No pip or conda.
+
+## uv and the sandbox
+- uv 0.9.9 panics inside the macOS Bash sandbox ("Attempted to create a NULL object") and cannot write `~/.cache/uv`.
+  The `sandbox.excludedCommands: ["uv", "uv *"]` setting did not take effect (2026-09-29).
+- **Main session** runs uv commands (`uv add`, `uv sync`, `uv lock`, `uv build`, `uv run …`) outside the sandbox
+  (`dangerouslyDisableSandbox: true`); the user has authorised this for uv only.
+- **Subagents never run uv** (their unsandboxed requests are denied). They use the already-synced venv, which works
+  sandboxed: `.venv/bin/python -m pytest`, `.venv/bin/ruff check`, `.venv/bin/ruff format`. If a subagent needs a new
+  dependency, it reports back and the main session runs `uv add`.
+- Python 3.12 check (main session): `UV_PROJECT_ENVIRONMENT=$TMPDIR/venv312 uv run --python 3.12 --all-extras python -m pytest`.
 - src layout: `src/geozarr_pyramid_maker/`. Python ≥3.12.
 - Logging: **loguru**; the library never adds or removes handlers (D-08). INFO for milestones, DEBUG for the plan, TRACE for internals, WARNING for auto-corrections.
 - All processing is lazy with dask
