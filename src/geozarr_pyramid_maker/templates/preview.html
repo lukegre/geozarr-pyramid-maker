@@ -36,7 +36,7 @@
       --shadow: 0 1px 3px rgba(0, 0, 0, .55);
     }
   }
-  body.collapsed { --sb-w: 36px; }
+  body.collapsed { --sb-w: 44px; }
   body.has-scrub { --scrub-h: 76px; }
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
@@ -65,7 +65,7 @@
     padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
     overflow: hidden; }
   #sbspine span { position: absolute; left: 50%; top: 0; transform: translateX(-50%) rotate(180deg);
-    writing-mode: vertical-rl; white-space: nowrap; font-size: 13px; line-height: 1;
+    writing-mode: vertical-rl; white-space: nowrap; font-size: 15px; line-height: 1;
     max-height: 100%; overflow: hidden; text-overflow: ellipsis; }
   #sbspine b { font-weight: 600; }
   #sbspine i { font-style: normal; color: var(--muted); }
@@ -971,9 +971,9 @@ function makeLayer() {
 function updateSpine() {
   const v = cur();
   const span = $('sbspine').firstElementChild;
-  span.replaceChildren(h('b', null, cfg.title), document.createTextNode(' \u00b7 '),
+  span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '),
     h('i', null, v.display_name || v.name));
-  $('sbspine').title = `${cfg.title} · ${v.display_name || v.name}`;
+  $('sbspine').title = `${cfg.source || cfg.title} · ${v.display_name || v.name}`;
 }
 
 function setActive(name) {
