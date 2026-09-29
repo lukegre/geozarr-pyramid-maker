@@ -317,9 +317,12 @@ def test_detection_error_before_writing(curvilinear, tmp_path):
     assert not path.exists()
 
 
-def test_preview_is_noop(polar_3031, tmp_path, log_records):
-    to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=512, validate=False, preview=True)
-    assert any(lvl == "WARNING" and "M5" in msg for lvl, msg in log_records)
+def test_preview_writes_html(polar_3031, tmp_path, log_records):
+    res = to_pyramid(
+        polar_3031, str(tmp_path / "o.zarr"), tile_size=512, validate=False, preview=True
+    )
+    assert res.preview_path == tmp_path / "o.zarr.preview.html" and res.preview_path.exists()
+    assert any(lvl == "INFO" and "Preview page written" in msg for lvl, msg in log_records)
 
 
 def test_validation_report_stored_and_logged(polar_3031, tmp_path, log_records):

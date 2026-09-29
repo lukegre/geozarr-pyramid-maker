@@ -219,3 +219,35 @@ def validate(store: Annotated[str, typer.Argument(help="GeoZarr store to validat
             typer.echo(f"{name}: ok")
     if bad:
         raise typer.Exit(1)
+
+
+@app.command()
+def preview(
+    store: Annotated[str, typer.Argument(help="GeoZarr store (local path or URL).")],
+    out: Annotated[Path | None, typer.Option("--out", help="HTML output path.")] = None,
+    serve: Annotated[bool, typer.Option("--serve", help="Serve the page locally.")] = False,
+    port: Annotated[int, typer.Option("--port", help="Port for --serve.")] = 8000,
+    open_browser: Annotated[
+        bool, typer.Option("--open", help="Open the page in a browser.")
+    ] = False,
+) -> None:
+    """Write an OpenLayers preview page for STORE, optionally serving it."""
+    from .preview import preview as _preview
+    from .preview import serve_page
+
+    if "://" not in store and not Path(store).exists():
+        typer.echo(f"Error: store {store!r} does not exist.", err=True)
+        raise typer.Exit(2)
+    with _clean_errors():
+        path = _preview(store, out=out)
+        typer.echo(f"html: {path}")
+        if serve:
+            if "://" in store:
+                raise ValueError("--serve needs a local store.")
+            serve_page(
+                path,
+                Path(store),
+                port=port,
+                open_browser=open_browser,
+                on_ready=lambda url: typer.echo(f"url: {url}"),
+            )

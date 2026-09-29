@@ -34,6 +34,7 @@ class PyramidResult:
     plan: PyramidPlan
     validation: dict[str, list[str]] | None  # None when validate=False
     timings: Mapping[str, float]  # "level_0": s, ..., "total": s
+    preview_path: Path | None = None  # set when preview=True
 
 
 # --------------------------------------------------------------------------- stores
@@ -235,9 +236,6 @@ def to_pyramid(
     if not any(v.chunks is not None for v in ds.data_vars.values()):
         logger.debug("Input is not dask-backed; chunking it to the level-0 plan")
 
-    if preview:
-        logger.warning("Preview is not implemented yet (M5); ignoring preview=True")
-
     timings: dict[str, float] = {}
     variables = [v.name for v in grid.variables]
     fills = {v.name: v.fill_value for v in grid.variables}
@@ -306,10 +304,19 @@ def to_pyramid(
     result_store = (
         store if isinstance(store, str) else (str(store) if isinstance(store, Path) else zstore)
     )
+    preview_path = None
+    if preview:
+        if isinstance(result_store, (str, Path)):
+            from .preview import preview as _preview
+
+            preview_path = _preview(result_store)
+        else:
+            logger.warning("preview=True needs a path or URL store; skipping the preview page")
     logger.info("Pyramid written to {} in {:.1f} s", result_store, timings["total"])
     return PyramidResult(
         store=result_store,
         plan=plan,
         validation=report,
         timings=timings,
+        preview_path=preview_path,
     )

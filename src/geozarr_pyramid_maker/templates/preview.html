@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ | GeoZarr preview</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/ol.css">
+<style>
+  html, body { height: 100%; margin: 0; font: 13px/1.4 system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; background: #1b1f24; }
+  #panel { position: absolute; top: 8px; right: 8px; z-index: 5; width: 250px; padding: 10px 12px;
+    background: rgba(255,255,255,.93); border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.35); }
+  #panel h1 { font-size: 14px; margin: 0 0 8px; word-break: break-all; }
+  #panel label { display: block; margin: 6px 0 2px; font-weight: 600; }
+  #panel select, #panel input[type=range] { width: 100%; box-sizing: border-box; }
+  #panel .row { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+  #legend { margin-top: 10px; }
+  #legend .bar { height: 12px; border-radius: 2px; border: 1px solid #888; }
+  #legend .ends { display: flex; justify-content: space-between; font-size: 12px; }
+  #legend .swatch { display: inline-block; width: 12px; height: 12px; margin-right: 4px;
+    vertical-align: middle; border: 1px solid #666; }
+  #note, #error { margin-top: 8px; font-size: 11px; color: #555; }
+  #error { color: #b00020; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <h1>__TITLE__</h1>
+  <label for="var">Variable</label>
+  <select id="var"></select>
+  <div id="dims"></div>
+  <label for="opacity">Opacity</label>
+  <input id="opacity" type="range" min="0" max="1" step="0.05" value="1">
+  <label class="row"><input id="osm" type="checkbox"> OSM basemap</label>
+  <div id="legend"></div>
+  <div id="note">Open via the preview server (geozarr-pyramid preview --serve); opening this
+    page directly from disk will not work.</div>
+  <div id="error"></div>
+</div>
+<script id="config" type="application/json">__CONFIG_JSON__</script>
+<script type="module">
+import Map from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/Map.js/+esm';
+import {getView, withExtentCenter, withHigherResolutions, withLowerResolutions, withZoom}
+  from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/View.js/+esm';
+import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/WebGLTile.js/+esm';
+import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/Tile.js/+esm';
+import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/GeoZarr.js/+esm';
+import OSM from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/OSM.js/+esm';
+import {register} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj/proj4.js/+esm';
+import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@__PROJ4_VERSION__/+esm';
+
+const cfg = JSON.parse(document.getElementById('config').textContent);
+const $ = (id) => document.getElementById(id);
+const showError = (e) => { console.error(e); $('error').textContent = String(e && e.message || e); };
+if (location.protocol === 'file:') showError('This page must be served over http (see note).');
+
+// The CRS has to be registered before the GeoZarr source resolves it.
+if (cfg.crs.proj4) {
+  proj4.defs(cfg.crs.name, cfg.crs.proj4);
+  register(proj4);
+}
+const storeUrl = new URL(cfg.store_url, location.href).href;
+const rgba = (c) => [c[0], c[1], c[2], 1];
+
+function colorExpr(v) {
+  if (v.categorical) {
+    const expr = ['match', ['band', 1]];
+    for (const [val, c] of v.palette) expr.push(val, rgba(c));
+    expr.push([0, 0, 0, 0]);
+    return expr;
+  }
+  const expr = ['interpolate', ['linear'], ['band', 1]];
+  const n = cfg.ramp.length;
+  cfg.ramp.forEach((c, i) => expr.push(v.vmin + (v.vmax - v.vmin) * i / (n - 1), rgba(c)));
+  return expr;
+}
+
+const state = {dims: {}, layer: null, source: null, map: null};
+const cur = () => cfg.variables.find((v) => v.name === $('var').value);
+const dimLabel = (d, i) => (d.labels && d.labels[i] !== undefined ? d.labels[i] : String(i));
+
+function buildLegend(v) {
+  const el = $('legend');
+  const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const units = v.units ? ` ${v.units}` : '';
+  if (v.categorical) {
+    el.innerHTML = v.palette.map(([val, c]) =>
+      `<div><span class="swatch" style="background:${css(c)}"></span>${val}</div>`).join('');
+  } else {
+    const grad = cfg.ramp.map((c, i) => `${css(c)} ${100 * i / (cfg.ramp.length - 1)}%`).join(',');
+    el.innerHTML = `<div class="bar" style="background:linear-gradient(to right,${grad})"></div>` +
+      `<div class="ends"><span>${+v.vmin.toPrecision(4)}</span><span>${units.trim()}</span>` +
+      `<span>${+v.vmax.toPrecision(4)}</span></div>`;
+  }
+}
+
+function buildDims(v) {
+  const box = $('dims');
+  box.innerHTML = '';
+  for (const name of v.dims) {
+    const d = cfg.dims[name];
+    if (state.dims[name] === undefined) state.dims[name] = 0;
+    const lab = document.createElement('label');
+    const out = document.createElement('span');
+    lab.append(`${name}: `, out);
+    const inp = document.createElement('input');
+    inp.type = 'range'; inp.min = 0; inp.max = d.size - 1; inp.step = 1;
+    inp.value = Math.min(state.dims[name], d.size - 1);
+    out.textContent = dimLabel(d, +inp.value);
+    inp.addEventListener('input', () => {
+      state.dims[name] = +inp.value;
+      out.textContent = dimLabel(d, +inp.value);
+      if (state.source) state.source.updateDimensions({[name]: +inp.value});
+    });
+    box.append(lab, inp);
+  }
+}
+
+function makeLayer() {
+  const v = cur();
+  const dimensions = {};
+  for (const n of v.dims) dimensions[n] = state.dims[n] || 0;
+  const opts = {url: storeUrl, bands: [v.name], transition: 0};
+  if (cfg.crs.projection) opts.projection = cfg.crs.projection;
+  if (v.dims.length) opts.dimensions = dimensions;
+  const source = new GeoZarr(opts);
+  source.addEventListener?.('error', showError);
+  return {source, layer: new WebGLTileLayer({
+    source, style: {color: colorExpr(v)}, opacity: +$('opacity').value})};
+}
+
+async function init() {
+  const first = cfg.variables[0];
+  for (const v of cfg.variables) $('var').add(new Option(v.name, v.name));
+  $('osm').checked = cfg.basemap_default;
+  $('var').value = first.name;
+  buildDims(first);
+  buildLegend(first);
+  const {source, layer} = makeLayer();
+  state.source = source; state.layer = layer;
+  const view = await getView(source, withLowerResolutions(1), withHigherResolutions(2),
+    withExtentCenter(), withZoom(2));
+  const osm = new TileLayer({source: new OSM(), visible: $('osm').checked});
+  state.map = new Map({target: 'map', layers: [osm, layer], view});
+  $('osm').addEventListener('change', () => osm.setVisible($('osm').checked));
+  $('opacity').addEventListener('input', () => state.layer.setOpacity(+$('opacity').value));
+  $('var').addEventListener('change', () => {
+    const v = cur();
+    buildDims(v); buildLegend(v);
+    const next = makeLayer();
+    state.map.getLayers().remove(state.layer);
+    state.layer.dispose?.();
+    state.map.getLayers().push(next.layer);
+    state.layer = next.layer; state.source = next.source;
+  });
+}
+init().catch(showError);
+</script>
+</body>
+</html>
