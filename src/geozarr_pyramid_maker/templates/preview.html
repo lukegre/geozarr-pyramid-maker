@@ -148,6 +148,8 @@
   .ol-attribution ul { margin: 0; padding: 2px 8px; color: var(--muted); font-size: 11px; text-shadow: none; }
   .ol-attribution a { color: inherit; }
   .ol-attribution button { background: transparent; color: var(--text); }
+  .bm-light canvas { filter: grayscale(1) brightness(1.08) contrast(.9); }
+  .bm-dark canvas { filter: invert(1) hue-rotate(180deg) grayscale(.85) brightness(.85) contrast(.9); }
   #readout { position: fixed; left: 0; top: 0; z-index: 8; pointer-events: none; padding: 2px 8px;
     border-radius: 6px; background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line);
     font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -190,7 +192,6 @@ import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer
 import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/Tile.js/+esm';
 import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/GeoZarr.js/+esm';
 import OSM from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/OSM.js/+esm';
-import XYZ from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/XYZ.js/+esm';
 import {register} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj/proj4.js/+esm';
 import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@__PROJ4_VERSION__/+esm';
 
@@ -592,12 +593,11 @@ function initBasemap() {
   const options = cfg.basemap_default ? [['light', 'Light'], ['dark', 'Dark'], ['osm', 'OSM'], ['none', 'None']] : [['none', 'None']];
   for (const [k, label] of options) sel.add(new Option(label, k));
   if (cfg.basemap_default) {
-    const carto = (style) => new TileLayer({source: new XYZ({
-      url: `https://{a-d}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`,
-      attributions: '\u00a9 OpenStreetMap contributors \u00a9 CARTO', maxZoom: 20}), visible: false});
-    layers.light = carto('light_nolabels');
-    layers.dark = carto('dark_nolabels');
-    layers.osm = new TileLayer({source: new OSM(), visible: false});
+    // One keyless source (OSM); Light/Dark are CSS filters on each layer's own canvas.
+    const osm = (className) => new TileLayer({className, source: new OSM(), visible: false});
+    layers.light = osm('bm-light');
+    layers.dark = osm('bm-dark');
+    layers.osm = osm('bm-osm');
   } else {
     sel.disabled = true;
   }
