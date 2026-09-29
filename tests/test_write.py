@@ -38,7 +38,7 @@ def _fixture_kwargs(name):
 def test_roundtrip_structure(name, request, tmp_path):
     ds = request.getfixturevalue(name)
     path = tmp_path / "out.zarr"
-    res = to_pyramid(ds, str(path), **_fixture_kwargs(name))
+    res = to_pyramid(ds, str(path), validate=False, **_fixture_kwargs(name))
     assert isinstance(res, PyramidResult)
     plan = res.plan
     tree = xr.open_datatree(path, engine="zarr", consolidated=True, mask_and_scale=False)
@@ -58,7 +58,7 @@ def test_roundtrip_structure(name, request, tmp_path):
             assert arr.chunks == spec.chunks
             assert arr.shards == spec.shards
     assert set(res.timings) == {*(f"level_{i}" for i in range(len(plan.levels))), "total"}
-    assert res.validation is None
+    assert res.validation is None  # validate=False
 
 
 def test_multi_level_exists(polar_3031, tmp_path):
@@ -316,10 +316,54 @@ def test_detection_error_before_writing(curvilinear, tmp_path):
     assert not path.exists()
 
 
-def test_validate_and_preview_are_noops(polar_3031, tmp_path, log_records):
-    to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=512, validate=True, preview=True)
+def test_preview_is_noop(polar_3031, tmp_path, log_records):
+    to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=512, validate=False, preview=True)
     assert any(lvl == "WARNING" and "M5" in msg for lvl, msg in log_records)
-    assert any(lvl == "DEBUG" and "M3" in msg for lvl, msg in log_records)
+
+
+def test_validation_report_stored_and_logged(polar_3031, tmp_path, log_records):
+    pytest.importorskip("geozarr_pyramid_maker.validate")
+    res = to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=64, validate=True)
+    assert res.validation is not None
+    assert all(not errs for errs in res.validation.values())
+    assert any(lvl == "INFO" and "validation passed" in msg for lvl, msg in log_records)
+
+
+def test_validation_failure_logged_not_raised(polar_3031, tmp_path, log_records, monkeypatch):
+    pytest.importorskip("geozarr_pyramid_maker.validate")
+    import sys
+
+    vmod = sys.modules["geozarr_pyramid_maker.validate"]  # package attr may be the function
+
+    monkeypatch.setattr(vmod, "validate", lambda *a, **k: {"spatial": ["boom"], "structure": []})
+    res = to_pyramid(polar_3031, str(tmp_path / "o.zarr"), tile_size=512, validate=True)
+    assert res.validation == {"spatial": ["boom"], "structure": []}
+    assert any(lvl == "ERROR" and "boom" in msg for lvl, msg in log_records)
+
+
+def test_refuses_to_delete_foreign_dir(polar_3031, tmp_path):
+    target = tmp_path / "precious"
+    target.mkdir()
+    (target / "notes.txt").write_text("keep me")
+    with pytest.raises(FileExistsError, match="not a Zarr store; refusing to delete it"):
+        to_pyramid(polar_3031, str(target), tile_size=512, overwrite=True)
+    assert (target / "notes.txt").read_text() == "keep me"
+
+
+def test_refuses_to_write_into_foreign_dir(polar_3031, tmp_path):
+    target = tmp_path / "precious"
+    target.mkdir()
+    (target / "notes.txt").write_text("keep me")
+    with pytest.raises(FileExistsError, match="not a Zarr store"):
+        to_pyramid(polar_3031, str(target), tile_size=512)
+    assert sorted(p.name for p in target.iterdir()) == ["notes.txt"]
+
+
+def test_empty_existing_dir_is_fine(polar_3031, tmp_path):
+    target = tmp_path / "empty"
+    target.mkdir()
+    to_pyramid(polar_3031, str(target), tile_size=512, validate=False)
+    assert (target / "zarr.json").exists()
 
 
 def test_write_module_public():

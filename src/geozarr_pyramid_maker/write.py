@@ -1,4 +1,4 @@
-"""Pyramid writer (PLAN 4.6): data only, metadata lands in M3."""
+"""Pyramid writer (PLAN 4.6): levels, GeoZarr metadata, consolidation and validation."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import xarray as xr
 import zarr
 import zarr.abc.store
@@ -18,6 +19,7 @@ from loguru import logger
 
 from .chunking import ChunkSpec
 from .detect import detect
+from .metadata import cf_prepare, level_attrs, root_attrs
 from .plan import PyramidPlan, build_plan
 from .resample import downsample
 
@@ -30,7 +32,7 @@ _CLOUD_HINT = "pip install geozarr-pyramid-maker[cloud]"
 class PyramidResult:
     store: str | zarr.abc.store.Store
     plan: PyramidPlan
-    validation: dict[str, list[str]] | None  # None until M3
+    validation: dict[str, list[str]] | None  # None when validate=False
     timings: Mapping[str, float]  # "level_0": s, ..., "total": s
 
 
@@ -84,6 +86,16 @@ def _store_has_data(store: zarr.abc.store.Store) -> bool:
     return True
 
 
+def _check_local_target(zstore: zarr.abc.store.Store, store: Any, overwrite: bool) -> None:
+    """Never delete or write into a non-empty local directory that is not a Zarr store."""
+    if not isinstance(zstore, zarr.storage.LocalStore):
+        return
+    root = Path(zstore.root)
+    if root.is_dir() and any(root.iterdir()) and not (root / "zarr.json").exists():
+        action = "delete" if overwrite else "write into"
+        raise FileExistsError(f"{store!r} is not a Zarr store; refusing to {action} it")
+
+
 # --------------------------------------------------------------------------- level writing
 
 
@@ -134,6 +146,18 @@ def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -
     level = plan.levels[k]
     fills = {v.name: v.fill_value for v in plan.grid.variables}
     ds = _prepare(ds, level.chunks, fills)
+    g = plan.grid
+    if k > 0:
+        # the plan's transform is authoritative: single-pixel axes cannot infer their step
+        ny, nx = level.shape
+        a, _, c, _, e, f = level.transform
+        ds = ds.assign_coords(
+            {
+                g.x_dim: (g.x_dim, c + a * (np.arange(nx) + 0.5), ds[g.x_dim].attrs),
+                g.y_dim: (g.y_dim, f + e * (np.arange(ny) + 0.5), ds[g.y_dim].attrs),
+            }
+        )
+    ds = cf_prepare(ds, g.crs, level.transform, g.x_dim, g.y_dim, plan.resampling)
     enc = _encoding(ds, level.chunks, fills, compression_level)
     ds.to_zarr(
         store,
@@ -144,6 +168,7 @@ def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -
         write_empty_chunks=False,
         encoding=enc,
     )
+    zarr.open_group(store, path=str(k), mode="r+").attrs.update(level_attrs(plan, k))
     for v in plan.grid.variables:
         shape = zarr.open_array(store, path=f"{k}/{v.name}", mode="r").shape
         if shape != level.var_shape(v.name):
@@ -178,6 +203,7 @@ def to_pyramid(
     """Write a GeoZarr multiscale pyramid (data only until M3)."""
     t_start = time.perf_counter()
     ds, grid = detect(obj, crs=crs)
+    ds_attrs = dict(ds.attrs)
     plan = build_plan(
         grid,
         resampling=resampling,
@@ -192,6 +218,7 @@ def to_pyramid(
     logger.debug("Pyramid plan:\n{}", plan)
 
     zstore = _resolve_store(store, storage_options)
+    _check_local_target(zstore, store, overwrite)
     if _store_has_data(zstore):
         if not overwrite:
             raise FileExistsError(
@@ -204,8 +231,6 @@ def to_pyramid(
     if not any(v.chunks is not None for v in ds.data_vars.values()):
         logger.info("Input is not dask-backed; chunking it to the level-0 plan.")
 
-    if validate:
-        logger.debug("validation lands in M3")
     if preview:
         logger.warning("preview lands in M5; ignoring preview=True")
 
@@ -231,7 +256,7 @@ def to_pyramid(
         src = xr.open_zarr(
             zstore, group=str(k), consolidated=False, chunks=None, mask_and_scale=False
         )
-        src = src[variables]
+        src = src[variables].drop_vars("spatial_ref", errors="ignore")  # rebuilt per level
         specs = plan.levels[k].chunks
         src = src.assign(
             {
@@ -256,11 +281,23 @@ def to_pyramid(
             _fmt_mib(plan.levels[k + 1].nbytes),
         )
 
+    zarr.open_group(zstore, mode="r+").attrs.update(root_attrs(plan, ds_attrs))  # before D-19
+
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="Consolidated metadata is currently not part", category=UserWarning
         )
         zarr.consolidate_metadata(zstore)
+    report = None
+    if validate:
+        from .validate import validate as _validate
+
+        report = _validate(zstore, plan=plan, storage_options=storage_options)
+        errors = [f"{k}: {e}" for k, errs in report.items() for e in errs]
+        if errors:
+            logger.error("validation failed with {} error(s):\n{}", len(errors), "\n".join(errors))
+        else:
+            logger.info("validation passed")
     timings["total"] = time.perf_counter() - t_start
     logger.info("Pyramid written in {:.1f}s", timings["total"])
     return PyramidResult(
@@ -268,6 +305,6 @@ def to_pyramid(
         if isinstance(store, str)
         else (str(store) if isinstance(store, Path) else zstore),
         plan=plan,
-        validation=None,
+        validation=report,
         timings=timings,
     )
