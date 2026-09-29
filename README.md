@@ -94,6 +94,32 @@ out.zarr/                 zarr.json: zarr_conventions (multiscales, spatial:, pr
   resolution; see [docs/research/03-openlayers-geozarr.md](docs/research/03-openlayers-geozarr.md).
 - Bool variables without a declared fill keep `False` as fill (no sentinel is possible).
 
+## Viewer image (RenkuLab and Docker)
+
+The `Dockerfile` builds an image that starts the blank viewer (`geozarr-pyramid preview` with no
+store) on port 8888. Type a store path or URL into the sidebar to open any pyramid; relative paths
+resolve from the working directory. CI (`.github/workflows/docker.yml`) publishes it to
+`ghcr.io/lukegre/geozarr-viewer` on every push to `main`.
+
+**RenkuLab session launcher**: add a custom environment with
+
+| Field | Value |
+|---|---|
+| Container image | `ghcr.io/lukegre/geozarr-viewer:latest` |
+| Default URL | `/` |
+| Port | `8888` |
+| UID / GID | `1000` / `100` |
+| Mount directory / Working directory | `/home/renku/work` |
+| Command / Arguments | leave empty (the image's entrypoint is used) |
+
+The server reads `RENKU_BASE_URL_PATH` (RenkuLab does not strip it) and `RENKU_WORKING_DIR`, so
+data connectors and project files under the working directory open by relative path. Make the
+ghcr package public, or add registry credentials in RenkuLab.
+
+**Locally**: `docker compose up --build`, then open <http://127.0.0.1:8888/>. Stores in `./data`
+(or `DATA_DIR=/path/to/stores`) are mounted as the working directory. Set `RENKU_BASE_URL_PATH`
+to try a URL prefix.
+
 ## Development
 
 ```bash

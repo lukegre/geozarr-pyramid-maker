@@ -613,7 +613,7 @@ def test_server_api_open(server, tmp_path):
 def test_template_store_picker(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert 'id="storepath"' in html and 'id="storeerr"' in html
-    assert "/api/open?store=" in html and "browser_blocked" in html
+    assert "api/open?store=" in html and "browser_blocked" in html and "api_base" in html
     assert "searchParams.set('store'" in html
 
 
@@ -674,3 +674,33 @@ def test_template_cleared_path_goes_blank(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "wanted === ''" in html and "?store=`" in html
     assert "if (blank) q.set('store', '')" in html
+
+
+def test_viewer_under_base_path(tiny, tmp_path):
+    from urllib.parse import quote
+
+    store = _pyramid(tiny, tmp_path)
+    try:
+        srv = pv.make_server(tmp_path, 0, base_path="/sessions/abc/")
+    except OSError as err:
+        pytest.skip(f"cannot bind a local port here: {err}")
+    srv.blank_viewer = True
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        status, _, body = _req(base + "/sessions/abc/")
+        assert status == 200 and _config(body.decode())["api_base"] == "/sessions/abc/"
+        assert _req(base + "/")[0] == 404  # outside the prefix
+        status, _, body = _req(f"{base}/sessions/abc/api/open?store={quote(store.name)}")
+        url = json.loads(body)["config"]["store_url"]
+        assert url.startswith("/sessions/abc/_stores/")
+        assert _req(base + url + "zarr.json")[0] == 200
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_norm_base_path():
+    assert pv._norm_base_path(None) == "" and pv._norm_base_path("/") == ""
+    assert pv._norm_base_path("a/b/") == "/a/b" and pv._norm_base_path("/a") == "/a"

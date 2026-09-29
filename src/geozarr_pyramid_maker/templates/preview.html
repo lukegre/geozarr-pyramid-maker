@@ -263,7 +263,8 @@ async function openStore(src) {
   }
   let res;
   try {
-    res = await fetch(new URL(`/api/open?store=${encodeURIComponent(src)}`, location.href));
+    // api_base: the server's URL prefix (set when the server renders the page, e.g. on RenkuLab)
+    res = await fetch(new URL(`${cfg0.api_base || '/'}api/open?store=${encodeURIComponent(src)}`, location.href));
   } catch (err) {
     throw storeError('The preview server is not reachable.',
       'Is `geozarr-pyramid preview --serve` still running?', 'no_server');
@@ -289,6 +290,7 @@ async function openStore(src) {
 
 const params = new URLSearchParams(location.search);
 let cfg = JSON.parse(document.getElementById('config').textContent);
+const cfg0 = cfg;  // as rendered: keeps api_base when another store's config replaces cfg
 cfg.source = cfg.source || cfg.store_url;
 let startupError = null;
 const wanted = params.get('store');

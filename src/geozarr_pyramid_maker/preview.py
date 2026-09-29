@@ -536,14 +536,15 @@ def display_source(src: str) -> str:
     return src if _is_url(src) else f"file://{src}"
 
 
-def check_store(store: str | os.PathLike) -> dict[str, Any]:
+def check_store(store: str | os.PathLike, *, label: str | None = None) -> dict[str, Any]:
     """Validate ``store`` for previewing and return its page config, or raise StoreError."""
     src = str(store).strip()
     if not src:
         raise StoreError("empty", "Enter a local path, an https:// URL or an s3:// URL.")
+    shown = label or src  # how the user typed it (messages), vs src (what is opened)
     local = _local_path(src)
     if local is not None:
-        _check_local(Path(local).expanduser(), src)
+        _check_local(Path(local).expanduser(), shown)
         src_open = str(Path(local).expanduser())
     else:
         src_open = src
@@ -555,9 +556,9 @@ def check_store(store: str | os.PathLike) -> dict[str, Any]:
         extra = f" It has groups {levels[:5]} but no multiscales layout." if levels else ""
         raise StoreError(
             "not_pyramid",
-            f"{src!r} is a Zarr store but not a GeoZarr multiscale pyramid "
+            f"{shown!r} is a Zarr store but not a GeoZarr multiscale pyramid "
             f"(no `multiscales.layout` in its root attributes).{extra}",
-            _convert_hint(src),
+            _convert_hint(shown),
         )
     try:
         return read_config(src_open)
@@ -566,8 +567,8 @@ def check_store(store: str | os.PathLike) -> dict[str, Any]:
     except Exception as err:
         raise StoreError(
             "invalid_pyramid",
-            f"{src!r} looks like a pyramid but cannot be previewed: {err}",
-            f"Check it with `geozarr-pyramid validate {src}`, or re-create it with "
+            f"{shown!r} looks like a pyramid but cannot be previewed: {err}",
+            f"Check it with `geozarr-pyramid validate {shown}`, or re-create it with "
             f"`geozarr-pyramid convert`.",
         ) from err
 
@@ -660,13 +661,46 @@ class RangeHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def parse_request(self) -> bool:
+        """Strip the server's base path; requests outside it get a 404 via ``_outside``."""
+        ok = super().parse_request()
+        base = getattr(self.server, "base_path", "")
+        self._outside = False
+        self._needs_slash = False
+        if ok and base:
+            parts = urlsplit(self.path)
+            if parts.path == base:
+                self._needs_slash = True
+            elif parts.path.startswith(base + "/"):
+                rest = parts.path[len(base) :]
+                self.path = rest + (f"?{parts.query}" if parts.query else "")
+            else:
+                self._outside = True
+        return ok
+
+    def _redirect_or_outside(self) -> bool:
+        if getattr(self, "_needs_slash", False):
+            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
+            self.send_header("Location", self.server.base_path + "/")  # type: ignore[attr-defined]
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        if getattr(self, "_outside", False):
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return True
+        return False
+
     def do_GET(self) -> None:
+        if self._redirect_or_outside():
+            return
         path = urlsplit(self.path).path
         if path == "/api/open":
             self._api_open()
             return
         if path in ("/", "/index.html") and getattr(self.server, "blank_viewer", False):
-            body = render_html(None).encode()
+            config = blank_config()
+            config["api_base"] = getattr(self.server, "base_path", "") + "/"
+            body = render_html(config).encode()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -688,12 +722,17 @@ class RangeHandler(SimpleHTTPRequestHandler):
         query = parse_qs(urlsplit(self.path).query)
         src = (query.get("store") or [""])[0]
         try:
-            config = check_store(src)
+            # relative local paths resolve from the served directory, not the process cwd
+            local = _local_path(src.strip())
+            to_check = src
+            if local is not None and local and not Path(local).expanduser().is_absolute():
+                to_check = str(Path(self.directory) / local)
+            config = check_store(to_check, label=src)
             local = _local_path(src.strip())
             if local is None:
                 config["store_url"] = browser_url(src)
             else:
-                config["store_url"] = _mount(self.server, Path(local).expanduser())
+                config["store_url"] = _mount(self.server, Path(_local_path(to_check)).expanduser())
         except StoreError as err:
             logger.info("preview: cannot open {!r}: {}", src, err.message)
             self._send_json(HTTPStatus.OK, {"ok": False, "error": err.to_dict()})
@@ -713,6 +752,8 @@ class RangeHandler(SimpleHTTPRequestHandler):
         return super().translate_path(path)
 
     def do_HEAD(self) -> None:
+        if self._redirect_or_outside():
+            return
         self._send_file(head=True)
 
     def _parse_range(self, header: str | None, size: int):
@@ -780,22 +821,36 @@ MOUNT_PREFIX = "_stores"
 
 
 def _mount(server: Any, path: Path) -> str:
-    """Serve a local store under /_stores/<n>/ and return its absolute URL path."""
+    """Serve a local store under <base>/_stores/<n>/ and return its absolute URL path."""
     mounts: dict[str, Path] = server.__dict__.setdefault("mounts", {})
+    base_path = getattr(server, "base_path", "")
     path = path.resolve()
     for key, base in mounts.items():
         if base == path:
-            return f"/{MOUNT_PREFIX}/{key}/"
+            return f"{base_path}/{MOUNT_PREFIX}/{key}/"
     key = str(len(mounts))
     mounts[key] = path
-    return f"/{MOUNT_PREFIX}/{key}/"
+    return f"{base_path}/{MOUNT_PREFIX}/{key}/"
 
 
-def make_server(root: str | os.PathLike, port: int = 8000) -> ThreadingHTTPServer:
-    """A threaded server on 127.0.0.1 serving ``root`` (use port 0 for a free port)."""
+def _norm_base_path(base_path: str | None) -> str:
+    """'' or '/a/b' (leading slash, no trailing slash)."""
+    b = (base_path or "").strip().strip("/")
+    return f"/{b}" if b else ""
+
+
+def make_server(
+    root: str | os.PathLike, port: int = 8000, *, host: str = "127.0.0.1", base_path: str = ""
+) -> ThreadingHTTPServer:
+    """A threaded server serving ``root`` (use port 0 for a free port).
+
+    ``base_path`` is a URL prefix the server lives under behind a proxy that does not strip it
+    (e.g. RenkuLab's ``RENKU_BASE_URL_PATH``); requests are matched with the prefix removed.
+    """
     handler = functools.partial(RangeHandler, directory=str(root))
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
+    server.base_path = _norm_base_path(base_path)  # type: ignore[attr-defined]
     return server
 
 
@@ -837,13 +892,19 @@ def serve_viewer(
     root: str | os.PathLike = ".",
     *,
     port: int = 8000,
+    host: str = "127.0.0.1",
+    base_path: str = "",
     open_browser: bool = False,
     on_ready: Callable[[str], None] | None = None,
 ) -> None:
-    """Serve the blank viewer at ``/`` until Ctrl-C; relative store paths resolve from ``root``."""
-    server = make_server(Path(root).resolve(), port)
+    """Serve the blank viewer at ``<base_path>/`` until Ctrl-C.
+
+    Relative store paths resolve from ``root``. Use ``host="0.0.0.0"`` inside a container.
+    """
+    server = make_server(Path(root).resolve(), port, host=host, base_path=base_path)
     server.blank_viewer = True  # type: ignore[attr-defined]
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    url = f"http://{shown}:{server.server_address[1]}{server.base_path}/"  # type: ignore[attr-defined]
     logger.info("Serving the GeoZarr viewer at {} (Ctrl-C to stop)", url)
     if on_ready:
         on_ready(url)

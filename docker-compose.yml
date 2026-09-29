@@ -1,0 +1,16 @@
+# Local run of the GeoZarr viewer image (the same image RenkuLab launches).
+#   docker compose up --build        -> http://127.0.0.1:8888/
+# Stores in ./data (or DATA_DIR) open by relative path, e.g. "my_pyramid.zarr".
+services:
+  viewer:
+    build: .
+    image: ghcr.io/lukegre/geozarr-viewer:latest
+    ports:
+      - "127.0.0.1:${GEOZARR_VIEWER_PORT:-8888}:8888"
+    volumes:
+      - "${DATA_DIR:-./data}:/home/renku/work"
+    environment:
+      # Set to test a proxy prefix locally, e.g. /sessions/test (then open .../sessions/test/)
+      RENKU_BASE_URL_PATH: "${RENKU_BASE_URL_PATH:-}"
+      # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY etc. can be added for private buckets
+    restart: unless-stopped
