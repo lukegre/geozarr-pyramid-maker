@@ -524,14 +524,27 @@ def _open_root(store: str) -> zarr.Group:
         raise StoreError("unreachable", f"Cannot read {store!r}: {msg}.") from err
 
 
+def _local_path(src: str) -> str | None:
+    """The local path for a plain or ``file://`` path, None for remote URLs."""
+    if src.lower().startswith("file://"):
+        return src[7:]
+    return None if _is_url(src) else src
+
+
+def display_source(src: str) -> str:
+    """How the page shows a store: local paths get a ``file://`` prefix."""
+    return src if _is_url(src) else f"file://{src}"
+
+
 def check_store(store: str | os.PathLike) -> dict[str, Any]:
     """Validate ``store`` for previewing and return its page config, or raise StoreError."""
     src = str(store).strip()
     if not src:
         raise StoreError("empty", "Enter a local path, an https:// URL or an s3:// URL.")
-    if not _is_url(src):
-        _check_local(Path(src).expanduser(), src)
-        src_open = str(Path(src).expanduser())
+    local = _local_path(src)
+    if local is not None:
+        _check_local(Path(local).expanduser(), src)
+        src_open = str(Path(local).expanduser())
     else:
         src_open = src
     root = _open_root(src_open)
@@ -646,15 +659,16 @@ class RangeHandler(SimpleHTTPRequestHandler):
         src = (query.get("store") or [""])[0]
         try:
             config = check_store(src)
-            if _is_url(src):
+            local = _local_path(src.strip())
+            if local is None:
                 config["store_url"] = browser_url(src)
             else:
-                config["store_url"] = _mount(self.server, Path(src).expanduser())
+                config["store_url"] = _mount(self.server, Path(local).expanduser())
         except StoreError as err:
             logger.info("preview: cannot open {!r}: {}", src, err.message)
             self._send_json(HTTPStatus.OK, {"ok": False, "error": err.to_dict()})
             return
-        config["source"] = src
+        config["source"] = display_source(src.strip())
         self._send_json(HTTPStatus.OK, {"ok": True, "config": config})
 
     def translate_path(self, path: str) -> str:
@@ -780,7 +794,7 @@ def preview(
         store_path = Path(store).resolve()
         out_path = Path(out) if out else store_path.parent / f"{name}.preview.html"
         config["store_url"] = _relative_url(store_path, out_path.parent)
-        config["source"] = str(store)
+        config["source"] = display_source(str(store))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(render_html(config), encoding="utf-8")
     logger.info("Preview page written to {}", out_path)
