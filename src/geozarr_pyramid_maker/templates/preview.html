@@ -831,7 +831,7 @@ document.addEventListener('keydown', (e) => {
 
 // --------------------------------------------------------------------------- map
 
-// Global data with a non-zero centre longitude: two extra copies of the data layer, shifted by
+// Global data (any centre longitude, 0 included): two extra copies of the data layer, shifted by
 // ±360° (their tile grids are offset, so chunk indices are unchanged). Not wrapX (see D-24, D-26).
 const LON_KEY = `gpm-preview:centerlon:${cfg.title}`;
 const normLon = (x) => { const l = ((x + 180) % 360 + 360) % 360 - 180; return Number.isFinite(l) ? l : 0; };
@@ -850,7 +850,7 @@ function shiftGrid(grid, dx) {
 }
 
 function makeLayers() {
-  const offsets = cfg.global && state.centerLon !== 0 ? [0, -360, 360] : [0];
+  const offsets = cfg.global ? [0, -360, 360] : [0];
   const made = offsets.map((dx) => {
     const m = makeLayer();
     if (dx) {
@@ -869,7 +869,7 @@ function makeLayers() {
 
 function viewFor(opts) {
   const lon = state.centerLon;
-  if (!cfg.global || lon === 0) return opts;
+  if (!cfg.global) return opts;
   const b = cfg.bbox;
   return ({...opts, center: [lon, (b[1] + b[3]) / 2], extent: [lon - 180, b[1], lon + 180, b[3]]});
 }
