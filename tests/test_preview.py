@@ -516,7 +516,7 @@ def test_global_flag(tiny, polar_3031, tmp_path):
 def test_template_center_longitude(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert 'id="centerlon"' in html and "if (!cfg.global) return;" in html
-    assert "[0, -360, 360]" in html and "state.centerLon !== 0" in html
+    assert "[0, -360, 360]" in html and "cfg.global ? [0, -360, 360]" in html
     assert "wrapX:" not in html
 
 
