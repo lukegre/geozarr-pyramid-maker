@@ -146,7 +146,7 @@ def test_view_promise_not_awaited(tiny, tmp_path):
     # Map's `view` option takes Promise<ViewOptions>; awaiting it hands Map a plain object.
     _, _, html = _generate(tiny, tmp_path)
     assert "await getView" not in html
-    assert "getView(source" in html
+    assert "getView(state.source" in html
 
 
 def test_missing_store(tmp_path):
@@ -502,3 +502,116 @@ def test_template_legend_ticks_and_default_not_reversed(tiny, tmp_path):
 def test_template_reversed_resets_on_colormap_change(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html
+
+
+def test_global_flag(tiny, polar_3031, tmp_path):
+    assert pv._is_global({"spatial:bbox": [-180, -90, 180, 90], "proj:code": "EPSG:4326"})
+    assert pv._is_global({"spatial:bbox": [0, -90, 360, 90], "proj:code": "EPSG:4326"})
+    assert not pv._is_global({"spatial:bbox": [-10, -90, 180, 90], "proj:code": "EPSG:4326"})
+    assert not pv._is_global({"spatial:bbox": [-180, -90, 180, 90], "proj:code": "EPSG:3031"})
+    _, _, html = _generate(polar_3031, tmp_path / "p")
+    assert _config(html)["global"] is False
+
+
+def test_template_center_longitude(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert 'id="centerlon"' in html and "if (!cfg.global) return;" in html
+    assert "[0, -360, 360]" in html and "state.centerLon !== 0" in html
+    assert "wrapX:" not in html
+
+
+# --------------------------------------------------------------------------- store checks
+
+
+def _code(src):
+    with pytest.raises(pv.StoreError) as info:
+        pv.check_store(src)
+    return info.value
+
+
+def test_check_store_not_found(tmp_path):
+    err = _code(tmp_path / "nope.zarr")
+    assert err.code == "not_found" and isinstance(err, FileNotFoundError)
+
+
+def test_check_store_netcdf_file_hints_convert(tmp_path):
+    f = tmp_path / "sst.nc"
+    f.write_bytes(b"CDF\x01")
+    err = _code(f)
+    assert err.code == "not_zarr" and "NetCDF" in err.message
+    assert "geozarr-pyramid convert" in err.hint and "sst_pyramid.zarr" in err.hint
+
+
+def test_check_store_plain_directory(tmp_path):
+    assert _code(tmp_path).code == "not_zarr"
+
+
+def test_check_store_zarr_v2(tmp_path):
+    (tmp_path / "v2.zarr").mkdir()
+    (tmp_path / "v2.zarr" / ".zgroup").write_text('{"zarr_format": 2}')
+    err = _code(tmp_path / "v2.zarr")
+    assert err.code == "zarr_v2" and "convert" in err.hint
+
+
+def test_check_store_plain_zarr_is_not_pyramid(tiny, tmp_path):
+    tiny.to_zarr(tmp_path / "flat.zarr", zarr_format=3, consolidated=False)
+    err = _code(tmp_path / "flat.zarr")
+    assert err.code == "not_pyramid"
+    assert "geozarr-pyramid convert" in err.hint and "to_pyramid" in err.hint
+
+
+def test_check_store_array_not_group(tmp_path):
+    import zarr
+
+    zarr.create_array(tmp_path / "a.zarr", shape=(2,), dtype="f4")
+    assert _code(tmp_path / "a.zarr").code == "not_group"
+
+
+def test_check_store_ok(tiny, tmp_path):
+    cfg = pv.check_store(_pyramid(tiny, tmp_path))
+    assert cfg["variables"][0]["name"] == "t"
+
+
+def test_check_store_empty_and_bad_scheme():
+    assert _code("  ").code == "empty"
+    with pytest.raises(pv.StoreError) as info:
+        pv.browser_url("ftp://host/x.zarr")
+    assert info.value.code == "unsupported_scheme"
+
+
+def test_browser_url():
+    assert pv.browser_url("s3://bkt/a/b.zarr") == "https://bkt.s3.amazonaws.com/a/b.zarr"
+    assert pv.browser_url("gs://bkt/b.zarr") == "https://storage.googleapis.com/bkt/b.zarr"
+    assert pv.browser_url("https://x.org/b.zarr") == "https://x.org/b.zarr"
+
+
+def test_cli_preview_explains_bad_store(tiny, tmp_path):
+    tiny.to_zarr(tmp_path / "flat.zarr", zarr_format=3, consolidated=False)
+    res = CliRunner().invoke(app, ["preview", str(tmp_path / "flat.zarr")])
+    assert res.exit_code == 2
+    assert "not a GeoZarr multiscale pyramid" in res.output and "convert" in res.output
+
+
+def test_server_api_open(server, tmp_path):
+    base, store = server
+    from urllib.parse import quote
+
+    status, _, body = _req(f"{base}/api/open?store={quote(str(store))}")
+    payload = json.loads(body)
+    assert status == 200 and payload["ok"] is True
+    url = payload["config"]["store_url"]
+    assert url.startswith("/_stores/") and payload["config"]["source"] == str(store)
+    status, _, meta = _req(base + url + "zarr.json")
+    assert status == 200 and b"multiscales" in meta
+    assert _req(base + url + "../../etc/passwd")[0] == 404
+
+    status, _, body = _req(f"{base}/api/open?store={quote(str(tmp_path / 'missing.zarr'))}")
+    err = json.loads(body)
+    assert err["ok"] is False and err["error"]["code"] == "not_found" and err["error"]["hint"]
+
+
+def test_template_store_picker(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert 'id="storepath"' in html and 'id="storeerr"' in html
+    assert "/api/open?store=" in html and "browser_blocked" in html
+    assert "searchParams.set('store'" in html

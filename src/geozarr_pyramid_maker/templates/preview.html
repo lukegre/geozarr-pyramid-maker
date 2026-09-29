@@ -63,6 +63,17 @@
   #sbhead { padding: 12px 44px 4px 16px; display: flex; align-items: flex-start; gap: var(--sp); }
   #sbhead h1 { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600;
     overflow-wrap: anywhere; }
+  #storepath { width: 100%; box-sizing: border-box; margin: -3px 0 0 -6px; padding: 2px 6px;
+    border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit;
+    font: inherit; text-overflow: ellipsis; }
+  #storepath:hover { border-color: var(--card-line); }
+  #storepath:focus { border-color: #4a90e2; outline: none; }
+  #storepath.busy { opacity: .6; }
+  #storeerr { margin: 6px 16px 4px; padding: 8px 10px; border-radius: 6px; font-size: 12px;
+    line-height: 1.4; border: 1px solid #d1242f; background: rgba(209, 36, 47, .1); overflow-wrap: anywhere; }
+  #storeerr .msg { font-weight: 600; color: #d1242f; }
+  #storeerr .hint { margin-top: 4px; }
+  #storeerr code { font-size: 11px; padding: 0 3px; border-radius: 3px; background: rgba(127, 127, 127, .2); }
   .iconbtn { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
     border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
   .iconbtn svg { width: 16px; height: 16px; }
@@ -107,6 +118,9 @@
   .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
   #sbfoot { padding: 12px 16px; border-top: 1px solid var(--card-line); }
   #sbfoot label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  #lonrow { margin-top: 10px; }
+  #sbfoot input[type=number] { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px;
+    border: 1px solid var(--card-line); background: transparent; color: inherit; font: inherit; }
   #sbfoot select { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px;
     border: 1px solid var(--card-line); background: var(--card); }
   #note, #error { margin-top: var(--sp); font-size: 11px; color: var(--muted); }
@@ -175,18 +189,25 @@
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
   <div id="sbhead">
-    <h1>__TITLE__</h1>
+    <h1><input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
+      aria-label="Store path or URL (press Enter to open)"
+      title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open."></h1>
     <button id="infobtn" class="iconbtn" type="button" aria-label="Dataset information" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none"
         stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4M8 4.6v.1" stroke="currentColor"
         stroke-width="1.6" stroke-linecap="round"/></svg>
     </button>
   </div>
+  <div id="storeerr" role="alert" hidden></div>
   <div id="infopanel" hidden></div>
   <div id="cards"></div>
   <div id="sbfoot">
     <label for="basemap">Basemap</label>
     <select id="basemap"></select>
+    <div id="lonrow" hidden>
+      <label for="centerlon">Centre longitude</label>
+      <input id="centerlon" type="number" min="-180" max="180" step="10" value="0">
+    </div>
     <div id="note" hidden>Open via the preview server (geozarr-pyramid preview --serve); opening this
       page directly from disk will not work.</div>
     <div id="error"></div>
@@ -198,6 +219,7 @@
 <script id="config" type="application/json">__CONFIG_JSON__</script>
 <script type="module">
 import Map from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/Map.js/+esm';
+import WMTSTileGrid from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/tilegrid/WMTS.js/+esm';
 import {getView, withExtentCenter, withHigherResolutions, withLowerResolutions, withZoom}
   from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/View.js/+esm';
 import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/WebGLTile.js/+esm';
@@ -207,8 +229,88 @@ import OSM from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/OSM.js/+e
 import {register} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj/proj4.js/+esm';
 import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@__PROJ4_VERSION__/+esm';
 
-const cfg = JSON.parse(document.getElementById('config').textContent);
 const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------------ store picker
+// The page ships with its own store baked in; `?store=` (set from the path box) asks the preview
+// server's /api/open endpoint for another one. The server checks the store in Python and returns
+// either a config or a {code, message, hint} error that is shown in the sidebar.
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
+const codeify = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+function storeError(message, hint = '', code = 'error') {
+  const e = new Error(message); e.hint = hint; e.code = code; return e;
+}
+function showStoreError(e) {
+  const box = $('storeerr');
+  if (!e) { box.hidden = true; box.textContent = ''; return; }
+  box.innerHTML = `<div class="msg">${codeify(e.message)}</div>` + (e.hint ? `<div class="hint">${codeify(e.hint)}</div>` : '');
+  box.hidden = false;
+}
+async function openStore(src) {
+  if (location.protocol === 'file:') {
+    throw storeError('Opening other stores needs the preview server.',
+      'Run `geozarr-pyramid preview STORE --serve` and use the page it serves.', 'no_server');
+  }
+  let res;
+  try {
+    res = await fetch(new URL(`/api/open?store=${encodeURIComponent(src)}`, location.href));
+  } catch (err) {
+    throw storeError('The preview server is not reachable.',
+      'Is `geozarr-pyramid preview --serve` still running?', 'no_server');
+  }
+  if (res.status === 404 || !(res.headers.get('content-type') || '').includes('json')) {
+    throw storeError('This page is not served by the geozarr-pyramid preview server, so it cannot open other stores.',
+      'Run `geozarr-pyramid preview STORE --serve` and use the page it serves.', 'no_server');
+  }
+  const body = await res.json();
+  if (!body.ok) throw storeError(body.error.message, body.error.hint, body.error.code);
+  const c = body.config;
+  // Python could read it; check the browser can too (remote stores need public access and CORS).
+  const probe = new URL('zarr.json', new URL(c.store_url.endsWith('/') ? c.store_url : c.store_url + '/', location.href));
+  let ok = false;
+  try { ok = (await fetch(probe)).ok; } catch (_) { ok = false; }
+  if (!ok) {
+    throw storeError(`The store is valid, but the browser cannot fetch ${probe.href}.`,
+      'Remote stores must be publicly readable and allow cross-origin requests (CORS) from this page; ' +
+      'private buckets cannot be previewed in the browser.', 'browser_blocked');
+  }
+  return c;
+}
+
+const params = new URLSearchParams(location.search);
+let cfg = JSON.parse(document.getElementById('config').textContent);
+cfg.source = cfg.source || cfg.store_url;
+let startupError = null;
+const wanted = params.get('store');
+if (wanted && wanted !== cfg.source) {
+  try { cfg = await openStore(wanted); } catch (e) { startupError = e; }
+}
+document.title = `${cfg.title} | GeoZarr preview`;
+
+function initStorePicker() {
+  const inp = $('storepath');
+  inp.value = startupError ? wanted : cfg.source;
+  if (startupError) showStoreError(startupError);
+  inp.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') { inp.value = cfg.source; showStoreError(null); inp.blur(); return; }
+    if (e.key !== 'Enter') return;
+    const src = inp.value.trim();
+    if (!src) { showStoreError(storeError('Enter a local path, an https:// URL or an s3:// URL.')); return; }
+    if (src === cfg.source && !startupError) { showStoreError(null); return; }
+    inp.classList.add('busy'); inp.disabled = true;
+    try {
+      await openStore(src);
+      const url = new URL(location.href);
+      url.searchParams.set('store', src);
+      url.searchParams.delete('lon');
+      location.assign(url.href);
+    } catch (err) {
+      showStoreError(err);
+    } finally {
+      inp.classList.remove('busy'); inp.disabled = false; inp.focus();
+    }
+  });
+}
 const showError = (e) => { console.error(e); $('error').textContent = String(e && e.message || e); };
 const SIDEBAR_KEY = 'gpm-preview:sidebar-collapsed';
 const store = {
@@ -288,7 +390,7 @@ function colorExpr(v) {
   return expr;
 }
 
-const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null,
+const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null, layers: [], sources: [],
   map: null, scrub: null, timer: null, optionsOpen: false};
 const cur = () => cfg.variables.find((v) => v.name === state.active);
 const unitsOf = (v) => v.units_display ?? v.units ?? '';
@@ -406,7 +508,7 @@ function buildCards() {
     slider.addEventListener('click', (e) => e.stopPropagation());
     slider.addEventListener('input', () => {
       state.opacity = +slider.value;
-      state.layer?.setOpacity(state.opacity);
+      for (const l of state.layers) l.setOpacity(state.opacity);
       for (const c of cards.values()) c.slider.value = slider.value;
     });
     cards.set(v.name, entry);
@@ -468,7 +570,7 @@ function buildStyleControls(v, opts, entry) {
     sync();
     if (clear) store.remove(styleKey(v)); else store.set(styleKey(v), JSON.stringify(styleOf(v)));
     if (v.name === state.active && state.layer) {
-      if (typeof state.layer.setStyle === 'function') state.layer.setStyle({color: colorExpr(v)});
+      for (const l of state.layers) if (typeof l.setStyle === 'function') l.setStyle({color: colorExpr(v)});
       else replaceLayer();
     }
   };
@@ -592,7 +694,7 @@ function stopPlay() {
 
 function setDim(name, i) {
   state.dims[name] = i;
-  if (state.source) state.source.updateDimensions({[name]: i});
+  for (const src of state.sources) src.updateDimensions({[name]: i});
 }
 
 function buildScrubber(v) {
@@ -729,6 +831,49 @@ document.addEventListener('keydown', (e) => {
 
 // --------------------------------------------------------------------------- map
 
+// Global data with a non-zero centre longitude: two extra copies of the data layer, shifted by
+// ±360° (their tile grids are offset, so chunk indices are unchanged). Not wrapX (see D-24, D-26).
+const LON_KEY = `gpm-preview:centerlon:${cfg.title}`;
+const normLon = (x) => { const l = ((x + 180) % 360 + 360) % 360 - 180; return Number.isFinite(l) ? l : 0; };
+const lonParam = new URLSearchParams(location.search).get('lon');
+state.centerLon = cfg.global ? normLon(+(lonParam ?? store.get(LON_KEY) ?? 0)) : 0;
+
+function shiftGrid(grid, dx) {
+  const e = grid.getExtent();
+  return new WMTSTileGrid({
+    extent: [e[0] + dx, e[1], e[2] + dx, e[3]],
+    origins: grid.getResolutions().map((_, z) => { const o = grid.getOrigin(z); return [o[0] + dx, o[1]]; }),
+    resolutions: grid.getResolutions(),
+    matrixIds: grid.getMatrixIds(),
+    tileSizes: grid.getResolutions().map((_, z) => grid.getTileSize(z)),
+  });
+}
+
+function makeLayers() {
+  const offsets = cfg.global && state.centerLon !== 0 ? [0, -360, 360] : [0];
+  const made = offsets.map((dx) => {
+    const m = makeLayer();
+    if (dx) {
+      const shift = () => {
+        if (m.source.getState() !== 'ready' || m.source.gpmShifted) return;
+        m.source.tileGrid = shiftGrid(m.source.tileGrid, dx);
+        m.source.gpmShifted = true;
+      };
+      m.source.on('change', shift);
+      shift();
+    }
+    return m;
+  });
+  return {source: made[0].source, layer: made[0].layer, sources: made.map((m) => m.source), layers: made.map((m) => m.layer)};
+}
+
+function viewFor(opts) {
+  const lon = state.centerLon;
+  if (!cfg.global || lon === 0) return opts;
+  const b = cfg.bbox;
+  return ({...opts, center: [lon, (b[1] + b[3]) / 2], extent: [lon - 180, b[1], lon + 180, b[3]]});
+}
+
 function makeLayer() {
   const v = cur();
   const dimensions = {};
@@ -752,11 +897,27 @@ function setActive(name) {
 }
 
 function replaceLayer() {
-  const next = makeLayer();
-  state.map.getLayers().remove(state.layer);
-  state.layer.dispose?.();
-  state.map.getLayers().push(next.layer);
-  state.layer = next.layer; state.source = next.source;
+  const next = makeLayers();
+  for (const l of state.layers) { state.map.getLayers().remove(l); l.dispose?.(); }
+  for (const l of next.layers) state.map.getLayers().push(l);
+  Object.assign(state, next);
+}
+
+function initCenterLon() {
+  if (!cfg.global) return;
+  $('lonrow').hidden = false;
+  const inp = $('centerlon');
+  inp.value = state.centerLon;
+  inp.addEventListener('change', () => {
+    const lon = normLon(+inp.value);
+    inp.value = lon;
+    if (lon === state.centerLon) return;
+    // Rebuilding the view in place is unreliable (a blank map), so reload with the new centre.
+    store.set(LON_KEY, String(lon));
+    const url = new URL(location.href);
+    url.searchParams.set('lon', String(lon));
+    location.replace(url.href);
+  });
 }
 
 function initBasemap() {
@@ -788,8 +949,10 @@ function initReadout(map) {
     if (e.dragging || !state.layer) return hide();
     let val = null;
     try {
-      const data = state.layer.getData(e.pixel);
-      if (data && data.length) val = data[0];
+      for (const l of state.layers) {
+        const data = l.getData(e.pixel);
+        if (data && data.length && Number.isFinite(data[0])) { val = data[0]; break; }
+      }
     } catch (_) { /* layer not rendered yet */ }
     if (val === null || !Number.isFinite(val)) return hide();
     const v = cur();
@@ -806,20 +969,22 @@ function initReadout(map) {
 }
 
 function init() {
+  initStorePicker();
   initSidebar();
   buildInfo();
   buildCards();
   refreshCards();
   buildScrubber(cur());
   const basemaps = initBasemap();
-  const {source, layer} = makeLayer();
-  state.source = source; state.layer = layer;
-  // Pass the promise itself: Map's `view` option accepts Promise<ViewOptions> and resolves it.
-  const view = getView(source, withLowerResolutions(1), withHigherResolutions(2),
-    withExtentCenter(), withZoom(2));
+  Object.assign(state, makeLayers());
+  // Pass a promise: Map's `view` option accepts Promise<ViewOptions> and resolves it. The resolved
+  // options are adjusted for the centre longitude.
+  const view = getView(state.source, withLowerResolutions(1), withHigherResolutions(2),
+    withExtentCenter(), withZoom(2)).then(viewFor);
   view.catch(showError);
-  state.map = new Map({target: 'map', layers: [...basemaps, layer], view});
+  state.map = new Map({target: 'map', layers: [...basemaps, ...state.layers], view});
   initReadout(state.map);
+  initCenterLon();
 }
 try { init(); } catch (e) { showError(e); }
 </script>
