@@ -496,3 +496,23 @@ def test_template_centre_longitude_hooks(tiny, tmp_path):
     assert (
         "extent:" not in html.split('<script type="module">')[1]
     )  # nothing blocks panning past 180
+
+
+@pytest.mark.parametrize(
+    ("name", "low_is_blue"),
+    [("RdBu_r", True), ("coolwarm", True), ("BrBG", False), ("PuOr", False)],
+)
+def test_diverging_colormap_direction(name, low_is_blue):
+    """RdBu_r/coolwarm: low blue, high red; BrBG: low brown, high teal; PuOr: low orange."""
+    lo, hi = pv.COLORMAPS[name][0], pv.COLORMAPS[name][-1]
+    if low_is_blue:
+        assert lo[2] > lo[0] and hi[0] > hi[2]
+    else:
+        assert lo[0] > lo[2] and hi[2] > hi[0]
+
+
+def test_template_legend_ticks_and_default_not_reversed(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "reversed: false" in html  # never reversed by default
+    assert "last && units" not in html  # units live in the card's metadata line only
+    assert "function layoutTicks" in html
