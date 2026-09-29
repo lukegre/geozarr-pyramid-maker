@@ -516,3 +516,14 @@ def test_template_legend_ticks_and_default_not_reversed(tiny, tmp_path):
     assert "reversed: false" in html  # never reversed by default
     assert "last && units" not in html  # units live in the card's metadata line only
     assert "function layoutTicks" in html
+
+
+def test_template_wrap_only_when_tile_grid_spans_the_world(tiny, tmp_path):
+    """OL wraps by tile column: it is only exact if tile_px * resolution * n_cols == world width."""
+    _, _, html = _generate(tiny, tmp_path)
+    script = html.split('<script type="module">')[1]
+    assert "function gridWrapsExactly" in script
+    assert "viewhint" in html  # tells the user when the data cannot be wrapped
+    # GeoZarr must not be created with wrapX unconditionally
+    assert "opts.wrapX = true" not in script
+    assert "opts.wrapX = state.wrap" in script
