@@ -107,15 +107,6 @@
   .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
   #sbfoot { padding: 12px 16px; border-top: 1px solid var(--card-line); }
   #sbfoot label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
-  #sbfoot .field + .field { margin-top: 12px; }
-  #sbfoot .vrow { display: flex; gap: 6px; }
-  #sbfoot input[type=number] { flex: 1; min-width: 0; width: 0; padding: 4px 8px; border-radius: 6px;
-    border: 1px solid var(--card-line); background: transparent; color: var(--text); }
-  #sbfoot input.bad { outline: 2px solid #d1242f; }
-  #viewhint { margin-top: 4px; font-size: 11px; color: var(--muted); }
-  #sbfoot .btn { flex: none; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--card-line);
-    background: transparent; color: var(--text); }
-  #sbfoot .btn:hover { background: var(--hover); }
   #sbfoot select { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px;
     border: 1px solid var(--card-line); background: var(--card); }
   #note, #error { margin-top: var(--sp); font-size: 11px; color: var(--muted); }
@@ -194,20 +185,8 @@
   <div id="infopanel" hidden></div>
   <div id="cards"></div>
   <div id="sbfoot">
-    <div class="field" id="viewsec" hidden>
-      <label for="clon">Centre longitude</label>
-      <div class="vrow">
-        <input id="clon" type="number" min="-180" max="180" step="any" aria-label="Centre longitude">
-        <button class="btn" type="button" data-lon="0">0&deg;</button>
-        <button class="btn" type="button" data-lon="180">180&deg;</button>
-      </div>
-      <div id="viewhint" hidden>This store's tiles don't line up with a 360&deg; world, so the map can be
-        re-centred but the data is not repeated past the antimeridian.</div>
-    </div>
-    <div class="field">
-      <label for="basemap">Basemap</label>
-      <select id="basemap"></select>
-    </div>
+    <label for="basemap">Basemap</label>
+    <select id="basemap"></select>
     <div id="note" hidden>Open via the preview server (geozarr-pyramid preview --serve); opening this
       page directly from disk will not work.</div>
     <div id="error"></div>
@@ -225,7 +204,6 @@ import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer
 import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/Tile.js/+esm';
 import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/GeoZarr.js/+esm';
 import OSM from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/OSM.js/+esm';
-import {transform} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj.js/+esm';
 import {register} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj/proj4.js/+esm';
 import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@__PROJ4_VERSION__/+esm';
 
@@ -311,7 +289,7 @@ function colorExpr(v) {
 }
 
 const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null,
-  map: null, wrap: false, wrapChecked: false, scrub: null, timer: null, optionsOpen: false};
+  map: null, scrub: null, timer: null, optionsOpen: false};
 const cur = () => cfg.variables.find((v) => v.name === state.active);
 const unitsOf = (v) => v.units_display ?? v.units ?? '';
 const dimLabel = (d, i) => (d.labels && d.labels[i] !== undefined ? d.labels[i] : String(i));
@@ -751,41 +729,6 @@ document.addEventListener('keydown', (e) => {
 
 // --------------------------------------------------------------------------- map
 
-// OL wraps tiles by tile column, so wrapped copies only line up when every level's tile grid spans
-// the world exactly: tile_px * resolution * n_columns == projection width. Otherwise the last partial
-// column shifts each repeat (e.g. 1440 px wide in 512 px tiles = 3 columns = 384 deg, not 360).
-function gridWrapsExactly(source) {
-  const grid = source.getTileGrid && source.getTileGrid();
-  const proj = source.getProjection && source.getProjection();
-  if (!grid || !proj || !proj.getExtent()) return false;
-  const pe = proj.getExtent();
-  const world = pe[2] - pe[0];
-  const ge = grid.getExtent();
-  const near = (a, b) => Math.abs(a - b) <= 1e-6 * world;
-  if (!near(ge[2] - ge[0], world)) return false;
-  return grid.getResolutions().every((res, z) => {
-    const size = grid.getTileSize(z);
-    const w = Array.isArray(size) ? size[0] : size;
-    return near(w * res * grid.getFullTileRange(z).getWidth(), world);
-  });
-}
-
-function watchWrap(source) {
-  if (!cfg.basemap_default || state.wrapChecked) return;
-  const check = () => {
-    if (state.wrapChecked || source.getState() !== 'ready') return;
-    state.wrapChecked = true;
-    if (gridWrapsExactly(source)) {
-      state.wrap = true;
-      if (source === state.source) replaceLayer();  // rebuild with wrapX on
-    } else {
-      $('viewhint').hidden = false;
-    }
-  };
-  source.on('change', check);
-  check();
-}
-
 function makeLayer() {
   const v = cur();
   const dimensions = {};
@@ -793,10 +736,8 @@ function makeLayer() {
   const opts = {url: storeUrl, bands: [v.name], transition: 0};
   if (cfg.crs.projection) opts.projection = cfg.crs.projection;
   if (v.dims.length) opts.dimensions = dimensions;
-  opts.wrapX = state.wrap;  // only switched on once the tile grid is known to span the world exactly
   const source = new GeoZarr(opts);
   source.addEventListener?.('error', showError);
-  watchWrap(source);
   return {source, layer: new WebGLTileLayer({
     source, style: {color: colorExpr(v)}, opacity: state.opacity})};
 }
@@ -825,7 +766,7 @@ function initBasemap() {
   for (const [k, label] of options) sel.add(new Option(label, k));
   if (cfg.basemap_default) {
     // One keyless source (OSM); Light/Dark are CSS filters on each layer's own canvas.
-    const osm = (className) => new TileLayer({className, source: new OSM({wrapX: true}), visible: false});
+    const osm = (className) => new TileLayer({className, source: new OSM(), visible: false});
     layers.light = osm('bm-light');
     layers.dark = osm('bm-dark');
     layers.osm = osm('bm-osm');
@@ -864,52 +805,6 @@ function initReadout(map) {
   map.getViewport().addEventListener('pointerleave', hide);
 }
 
-// --------------------------------------------------------------------------- centre longitude
-
-const VIEW_KEY = `gpm-preview:view:${cfg.title}`;
-const normLon = (lon) => ((((lon + 180) % 360) + 360) % 360) - 180;
-
-function initCentre(map, viewPromise) {
-  $('viewsec').hidden = !cfg.basemap_default;
-  if (!cfg.basemap_default) return;
-  const input = $('clon');
-  const lonLat = () => {
-    const view = map.getView();
-    const c = view.getCenter();
-    return c ? transform(c, view.getProjection(), 'EPSG:4326') : null;
-  };
-  const setCentre = (lon) => {
-    const view = map.getView();
-    const ll = lonLat();
-    if (!ll) return;
-    view.setCenter(transform([lon, ll[1]], 'EPSG:4326', view.getProjection()));  // keeps zoom and latitude
-  };
-  const show = () => {
-    const ll = lonLat();
-    if (ll && document.activeElement !== input) input.value = String(+normLon(ll[0]).toFixed(1));
-  };
-  const apply = (raw) => {
-    const lon = parseFloat(raw);
-    if (!Number.isFinite(lon)) { show(); return; }
-    const v = Math.abs(lon) <= 180 ? lon : normLon(lon);
-    setCentre(v);
-    input.value = String(+v.toFixed(1));
-    try { localStorage.setItem(VIEW_KEY, JSON.stringify({lon: v})); } catch (_) { /* storage unavailable */ }
-  };
-  input.addEventListener('change', () => apply(input.value));
-  for (const b of document.querySelectorAll('#viewsec [data-lon]')) {
-    b.addEventListener('click', () => apply(b.dataset.lon));
-  }
-  map.on('moveend', show);
-  // The view is a Promise: restore the saved centre once Map has swapped the resolved View in.
-  Promise.resolve(viewPromise).then(() => setTimeout(() => {
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null'); } catch (_) { /* ignore */ }
-    if (saved && Number.isFinite(saved.lon)) setCentre(saved.lon);
-    show();
-  }, 0)).catch(() => {});
-}
-
 function init() {
   initSidebar();
   buildInfo();
@@ -925,7 +820,6 @@ function init() {
   view.catch(showError);
   state.map = new Map({target: 'map', layers: [...basemaps, layer], view});
   initReadout(state.map);
-  initCentre(state.map, view);
 }
 try { init(); } catch (e) { showError(e); }
 </script>

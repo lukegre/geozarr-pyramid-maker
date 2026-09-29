@@ -479,25 +479,6 @@ def test_template_style_controls(tiny, tmp_path):
     assert ".ol-attribution.ol-uncollapsible" in html  # OL's uncollapsible rule sets bottom:0
 
 
-def test_template_centre_longitude_hooks(tiny, tmp_path):
-    _, _, html = _generate(tiny, tmp_path)
-    for token in (
-        'id="clon"',
-        "Centre longitude",
-        "gpm-preview:view:",
-        "wrapX: true",
-        "moveend",
-        "transform(",
-        "$('viewsec').hidden = !cfg.basemap_default",
-        "data-lon",
-    ):
-        assert token in html, token
-    assert "ol@" in html and "/proj.js/+esm" in html
-    assert (
-        "extent:" not in html.split('<script type="module">')[1]
-    )  # nothing blocks panning past 180
-
-
 @pytest.mark.parametrize(
     ("name", "low_is_blue"),
     [("RdBu_r", True), ("coolwarm", True), ("BrBG", False), ("PuOr", False)],
@@ -516,14 +497,3 @@ def test_template_legend_ticks_and_default_not_reversed(tiny, tmp_path):
     assert "reversed: false" in html  # never reversed by default
     assert "last && units" not in html  # units live in the card's metadata line only
     assert "function layoutTicks" in html
-
-
-def test_template_wrap_only_when_tile_grid_spans_the_world(tiny, tmp_path):
-    """OL wraps by tile column: it is only exact if tile_px * resolution * n_cols == world width."""
-    _, _, html = _generate(tiny, tmp_path)
-    script = html.split('<script type="module">')[1]
-    assert "function gridWrapsExactly" in script
-    assert "viewhint" in html  # tells the user when the data cannot be wrapped
-    # GeoZarr must not be created with wrapX unconditionally
-    assert "opts.wrapX = true" not in script
-    assert "opts.wrapX = state.wrap" in script
