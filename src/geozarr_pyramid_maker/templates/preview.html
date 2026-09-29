@@ -300,9 +300,8 @@ function initStorePicker() {
     inp.classList.add('busy'); inp.disabled = true;
     try {
       await openStore(src);
-      const url = new URL(location.href);
+      const url = new URL(location.pathname, location.href);  // new store: drop the old settings
       url.searchParams.set('store', src);
-      url.searchParams.delete('lon');
       location.assign(url.href);
     } catch (err) {
       showStoreError(err);
@@ -393,6 +392,71 @@ function colorExpr(v) {
 const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null, layers: [], sources: [],
   map: null, scrub: null, timer: null, optionsOpen: false};
 const cur = () => cfg.variables.find((v) => v.name === state.active);
+
+// ------------------------------------------------------------------ shareable URL
+// The URL mirrors the view: store, var, one parameter per dim of the active variable (ISO date
+// for time-like dims, else index), cmap, rev, vmin, vmax, opacity, lon and the map view (x, y, z).
+// URL values win over remembered (localStorage) ones, so a shared link reproduces the view.
+const dimToParam = (d, i) => {
+  const iso = cfg.dims[d].iso;
+  return iso && iso[i] ? iso[i].replace(/T00:00:00(\.0+)?Z$/, '') : String(i);
+};
+function dimFromParam(d, raw) {
+  const {iso, size} = cfg.dims[d];
+  if (iso) {
+    const i = iso.findIndex((t) => t && t.startsWith(raw));
+    if (i >= 0) return i;
+  }
+  const i = Number(raw);
+  return Number.isInteger(i) && i >= 0 && i < size ? i : null;
+}
+(function applyUrlState() {
+  const v0 = params.get('var');
+  if (v0 && cfg.variables.some((v) => v.name === v0)) state.active = v0;
+  for (const d of Object.keys(cfg.dims)) {
+    const raw = params.get(d);
+    if (raw === null) continue;
+    const i = dimFromParam(d, raw);
+    if (i !== null) state.dims[d] = i;
+  }
+  const op = Number(params.get('opacity'));
+  if (params.has('opacity') && op >= 0 && op <= 1) state.opacity = op;
+  const v = cur();
+  const st = {...styleOf(v)};
+  const cm = params.get('cmap');
+  if (cm && cmaps[cm]) st.cmap = cm;
+  if (params.has('rev')) st.reversed = params.get('rev') === '1';
+  const lo = Number(params.get('vmin')), hi = Number(params.get('vmax'));
+  if (params.has('vmin') && Number.isFinite(lo)) st.vmin = lo;
+  if (params.has('vmax') && Number.isFinite(hi)) st.vmax = hi;
+  if (st.vmin < st.vmax) styles[v.name] = st;
+})();
+
+let urlTimer = null;
+function syncUrl() {
+  clearTimeout(urlTimer);
+  urlTimer = setTimeout(() => {
+    const v = cur();
+    const st = styleOf(v);
+    const q = new URLSearchParams();
+    q.set('store', cfg.source);
+    q.set('var', v.name);
+    for (const d of v.dims) q.set(d, dimToParam(d, state.dims[d] || 0));
+    q.set('cmap', st.cmap);
+    if (st.reversed) q.set('rev', '1');
+    q.set('vmin', String(+Number(st.vmin).toPrecision(6)));
+    q.set('vmax', String(+Number(st.vmax).toPrecision(6)));
+    if (state.opacity !== 1) q.set('opacity', String(state.opacity));
+    if (cfg.global) q.set('lon', String(state.centerLon));
+    const view = state.map && state.map.getView();
+    const c = view && view.getCenter && view.getCenter();
+    if (c && Number.isFinite(view.getZoom())) {
+      q.set('x', c[0].toPrecision(6)); q.set('y', c[1].toPrecision(6));
+      q.set('z', view.getZoom().toFixed(2));
+    }
+    history.replaceState(null, '', `${location.pathname}?${q.toString().replace(/%2F/g, '/').replace(/%3A/g, ':')}`);
+  }, 150);
+}
 const unitsOf = (v) => v.units_display ?? v.units ?? '';
 const dimLabel = (d, i) => (d.labels && d.labels[i] !== undefined ? d.labels[i] : String(i));
 const fmt = (x) => String(+Number(x).toPrecision(6));
@@ -509,6 +573,7 @@ function buildCards() {
     slider.addEventListener('input', () => {
       state.opacity = +slider.value;
       for (const l of state.layers) l.setOpacity(state.opacity);
+      syncUrl();
       for (const c of cards.values()) c.slider.value = slider.value;
     });
     cards.set(v.name, entry);
@@ -569,6 +634,7 @@ function buildStyleControls(v, opts, entry) {
     entry.legend = legend;
     sync();
     if (clear) store.remove(styleKey(v)); else store.set(styleKey(v), JSON.stringify(styleOf(v)));
+    syncUrl();
     if (v.name === state.active && state.layer) {
       for (const l of state.layers) if (typeof l.setStyle === 'function') l.setStyle({color: colorExpr(v)});
       else replaceLayer();
@@ -694,6 +760,7 @@ function stopPlay() {
 
 function setDim(name, i) {
   state.dims[name] = i;
+  syncUrl();
   for (const src of state.sources) src.updateDimensions({[name]: i});
 }
 
@@ -868,10 +935,14 @@ function makeLayers() {
 }
 
 function viewFor(opts) {
+  const x = Number(params.get('x')), y = Number(params.get('y')), z = Number(params.get('z'));
+  const pinned = params.has('z') && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z);
   const lon = state.centerLon;
-  if (!cfg.global) return opts;
   const b = cfg.bbox;
-  return ({...opts, center: [lon, (b[1] + b[3]) / 2], extent: [lon - 180, b[1], lon + 180, b[3]]});
+  if (cfg.global) {
+    opts = {...opts, center: [lon, (b[1] + b[3]) / 2], extent: [lon - 180, b[1], lon + 180, b[3]]};
+  }
+  return pinned ? {...opts, center: [x, y], zoom: z} : opts;
 }
 
 function makeLayer() {
@@ -890,6 +961,7 @@ function makeLayer() {
 function setActive(name) {
   if (name === state.active) return;
   state.active = name;
+  syncUrl();
   refreshCards();
   buildScrubber(cur());
   replaceLayer();
@@ -916,6 +988,7 @@ function initCenterLon() {
     store.set(LON_KEY, String(lon));
     const url = new URL(location.href);
     url.searchParams.set('lon', String(lon));
+    for (const k of ['x', 'y', 'z']) url.searchParams.delete(k);
     location.replace(url.href);
   });
 }
@@ -984,6 +1057,8 @@ function init() {
   view.catch(showError);
   state.map = new Map({target: 'map', layers: [...basemaps, ...state.layers], view});
   initReadout(state.map);
+  state.map.on('moveend', syncUrl);
+  syncUrl();
   initCenterLon();
 }
 try { init(); } catch (e) { showError(e); }
