@@ -112,6 +112,7 @@
   #sbfoot input[type=number] { flex: 1; min-width: 0; width: 0; padding: 4px 8px; border-radius: 6px;
     border: 1px solid var(--card-line); background: transparent; color: var(--text); }
   #sbfoot input.bad { outline: 2px solid #d1242f; }
+  #viewhint { margin-top: 4px; font-size: 11px; color: var(--muted); }
   #sbfoot .btn { flex: none; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--card-line);
     background: transparent; color: var(--text); }
   #sbfoot .btn:hover { background: var(--hover); }
@@ -200,6 +201,8 @@
         <button class="btn" type="button" data-lon="0">0&deg;</button>
         <button class="btn" type="button" data-lon="180">180&deg;</button>
       </div>
+      <div id="viewhint" hidden>This store's tiles don't line up with a 360&deg; world, so the map can be
+        re-centred but the data is not repeated past the antimeridian.</div>
     </div>
     <div class="field">
       <label for="basemap">Basemap</label>
@@ -308,7 +311,7 @@ function colorExpr(v) {
 }
 
 const state = {active: cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null,
-  map: null, scrub: null, timer: null, optionsOpen: false};
+  map: null, wrap: false, wrapChecked: false, scrub: null, timer: null, optionsOpen: false};
 const cur = () => cfg.variables.find((v) => v.name === state.active);
 const unitsOf = (v) => v.units_display ?? v.units ?? '';
 const dimLabel = (d, i) => (d.labels && d.labels[i] !== undefined ? d.labels[i] : String(i));
@@ -748,6 +751,41 @@ document.addEventListener('keydown', (e) => {
 
 // --------------------------------------------------------------------------- map
 
+// OL wraps tiles by tile column, so wrapped copies only line up when every level's tile grid spans
+// the world exactly: tile_px * resolution * n_columns == projection width. Otherwise the last partial
+// column shifts each repeat (e.g. 1440 px wide in 512 px tiles = 3 columns = 384 deg, not 360).
+function gridWrapsExactly(source) {
+  const grid = source.getTileGrid && source.getTileGrid();
+  const proj = source.getProjection && source.getProjection();
+  if (!grid || !proj || !proj.getExtent()) return false;
+  const pe = proj.getExtent();
+  const world = pe[2] - pe[0];
+  const ge = grid.getExtent();
+  const near = (a, b) => Math.abs(a - b) <= 1e-6 * world;
+  if (!near(ge[2] - ge[0], world)) return false;
+  return grid.getResolutions().every((res, z) => {
+    const size = grid.getTileSize(z);
+    const w = Array.isArray(size) ? size[0] : size;
+    return near(w * res * grid.getFullTileRange(z).getWidth(), world);
+  });
+}
+
+function watchWrap(source) {
+  if (!cfg.basemap_default || state.wrapChecked) return;
+  const check = () => {
+    if (state.wrapChecked || source.getState() !== 'ready') return;
+    state.wrapChecked = true;
+    if (gridWrapsExactly(source)) {
+      state.wrap = true;
+      if (source === state.source) replaceLayer();  // rebuild with wrapX on
+    } else {
+      $('viewhint').hidden = false;
+    }
+  };
+  source.on('change', check);
+  check();
+}
+
 function makeLayer() {
   const v = cur();
   const dimensions = {};
@@ -755,9 +793,10 @@ function makeLayer() {
   const opts = {url: storeUrl, bands: [v.name], transition: 0};
   if (cfg.crs.projection) opts.projection = cfg.crs.projection;
   if (v.dims.length) opts.dimensions = dimensions;
-  if (cfg.basemap_default) opts.wrapX = true;  // global lon/lat grids repeat across the antimeridian
+  opts.wrapX = state.wrap;  // only switched on once the tile grid is known to span the world exactly
   const source = new GeoZarr(opts);
   source.addEventListener?.('error', showError);
+  watchWrap(source);
   return {source, layer: new WebGLTileLayer({
     source, style: {color: colorExpr(v)}, opacity: state.opacity})};
 }
