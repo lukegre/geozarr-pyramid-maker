@@ -333,6 +333,8 @@ def test_handler_options_head_404_offline(datadir):
         ("Area in m^2", "Area in m²"),
         ("Sea   surface  temperature", "Sea surface temperature"),
         ("  padded ", "padded"),
+        ("$\\Delta f\\mathrm{CO} _2$", "ΔfCO₂"),
+        ("x ^2 and y _{3}", "x² and y₃"),
     ],
 )
 def test_display_name_cleans_latex(raw, expected):
@@ -426,3 +428,52 @@ def test_template_layout_hooks(tiny, tmp_path):
     assert "getData(" in html
     assert "overflow-wrap: anywhere" in html and "break-all" not in html
     assert "location.protocol === 'file:'" in html
+
+
+# Fixed cases mirrored in the template's niceTicks() comment (JS and Python must agree).
+_TICK_CASES = [
+    ((0.0, 1.0), [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]),
+    ((280.0, 470.0), [300.0, 350.0, 400.0, 450.0]),
+    ((-3.3, 31.7), [0.0, 10.0, 20.0, 30.0]),
+    ((0.0013, 0.0021), [0.0014, 0.0016, 0.0018, 0.002]),
+    ((1e6, 9.3e6), [2e6, 4e6, 6e6, 8e6]),
+    ((5.0, 5.5), [5.0, 5.1, 5.2, 5.3, 5.4, 5.5]),
+    ((2.0, 3.0), [2.0, 2.2, 2.4, 2.6, 2.8, 3.0]),
+]
+
+
+@pytest.mark.parametrize(("args", "expected"), _TICK_CASES)
+def test_nice_ticks_fixed_cases(args, expected):
+    assert pv._nice_ticks(*args) == pytest.approx(expected, rel=1e-9)
+
+
+def test_colormaps_config(tiny, tmp_path):
+    cm = pv.COLORMAPS
+    assert {"viridis", "magma", "inferno", "cividis", "turbo"} <= set(cm)
+    assert {"RdBu_r", "coolwarm", "BrBG", "PuOr"} <= set(cm)
+    for name, stops in cm.items():
+        assert 9 <= len(stops) <= 11, name
+        assert all(
+            len(c) == 3 and all(isinstance(x, int) and 0 <= x <= 255 for x in c) for c in stops
+        )
+    assert cm["viridis"][0] == [68, 1, 84] and cm["viridis"][-1] == [253, 231, 37]
+    _, _, html = _generate(tiny, tmp_path)
+    cfg = _config(html)
+    assert cfg["colormaps"] == cm
+    assert cfg["ramp"] == pv.RAMP  # kept for back-compat
+
+
+def test_template_style_controls(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    for token in (
+        "setStyle(",
+        "Symmetric",
+        "Reset",
+        "function niceTicks",
+        "cfg.colormaps",
+        "gpm-preview:style:",
+        "type = 'number'",
+        "Reversed",
+    ):
+        assert token in html, token
+    assert ".ol-attribution.ol-uncollapsible" in html  # OL's uncollapsible rule sets bottom:0
