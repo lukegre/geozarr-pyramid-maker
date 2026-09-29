@@ -1,7 +1,7 @@
 # GeoZarr viewer for RenkuLab session launchers (and any container host).
 # Starts the blank viewer on port 8888; RenkuLab's URL prefix comes from $RENKU_BASE_URL_PATH.
-# Build: docker build -t lukegre/geozarr-viewer:latest .
-# Run:   docker run --rm -p 8888:8888 -v "$PWD:/home/renku/work" lukegre/geozarr-viewer:latest
+# Build: docker build --platform linux/amd64 -t lukegre/geozarr-viewer:latest .
+# Run:   docker run --platform linux/amd64 --rm -p 8888:8888 -v "$PWD:/home/renku/work" lukegre/geozarr-viewer:latest
 FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.9 /uv /usr/local/bin/uv
