@@ -233,8 +233,22 @@ def preview(
     open_browser: Annotated[
         bool, typer.Option("--open", help="Open the page in a browser.")
     ] = False,
+    host: Annotated[
+        str, typer.Option("--host", help="Interface to bind (0.0.0.0 in containers).")
+    ] = "127.0.0.1",
+    base_path: Annotated[
+        str,
+        typer.Option(
+            "--base-path",
+            envvar="RENKU_BASE_URL_PATH",
+            help="URL prefix when served behind a proxy (defaults to $RENKU_BASE_URL_PATH).",
+        ),
+    ] = "",
 ) -> None:
-    """Write an OpenLayers preview page for STORE, optionally serving it."""
+    """Write an OpenLayers preview page for STORE, optionally serving it.
+
+    Without STORE, serve a blank viewer that can open any pyramid.
+    """
     from .preview import preview as _preview
     from .preview import serve_page, serve_viewer
 
@@ -243,6 +257,8 @@ def preview(
             serve_viewer(
                 ".",
                 port=port,
+                host=host,
+                base_path=base_path,
                 open_browser=open_browser,
                 on_ready=lambda url: typer.echo(f"url: {url}"),
             )

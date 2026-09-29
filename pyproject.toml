@@ -26,6 +26,8 @@ geozarr-pyramid = "geozarr_pyramid_maker.cli:app"
 
 [project.optional-dependencies]
 cloud = [
+    "aiohttp>=3.9",
+    "fsspec>=2025.1",
     "obstore>=0.11.1",
 ]
 
