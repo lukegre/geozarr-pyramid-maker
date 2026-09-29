@@ -1,6 +1,7 @@
 """Tests for preview.py (M5): HTML generation and the local CORS/Range server."""
 
 import errno
+import itertools
 import json
 import re
 import threading
@@ -318,3 +319,107 @@ def test_handler_options_head_404_offline(datadir):
     assert code == 404 and headers["Access-Control-Allow-Origin"] == "*"
     code, _, _ = _raw(datadir, b"GET /../etc/passwd HTTP/1.1\r\nHost: x\r\n\r\n")
     assert code == 404
+
+
+# --------------------------------------------------------------------------- layout config
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Surface $fCO_2$", "Surface fCO₂"),
+        ("$\\mathrm{fCO}_{2}$ difference", "fCO₂ difference"),
+        ("$\\Delta \\mathrm{pH}$", "ΔpH"),
+        ("Area in m^2", "Area in m²"),
+        ("Sea   surface  temperature", "Sea surface temperature"),
+        ("  padded ", "padded"),
+    ],
+)
+def test_display_name_cleans_latex(raw, expected):
+    assert pv._display_name(raw, "fallback") == expected
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "$$"])
+def test_display_name_falls_back_to_variable_name(raw):
+    assert pv._display_name(raw, "sst") == "sst"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("uatm", "µatm"),
+        ("degC", "°C"),
+        ("degree_Celsius", "°C"),
+        ("celsius", "°C"),
+        ("m yr-1", "m yr⁻¹"),
+        ("mol m-2 s-1", "mol m⁻² s⁻¹"),
+        ("m/yr", "m/yr"),
+        ("", ""),
+        ("K", "K"),
+    ],
+)
+def test_units_display(raw, expected):
+    assert pv._units_display(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("vmin", "vmax"),
+    [(0.0, 1.0), (280.0, 470.0), (-3.3, 31.7), (0.0013, 0.0021), (1e6, 9.3e6), (5.0, 5.5)],
+)
+def test_nice_ticks(vmin, vmax):
+    ticks = pv._nice_ticks(vmin, vmax)
+    assert 4 <= len(ticks) <= 6
+    assert all(vmin <= t <= vmax for t in ticks)
+    assert ticks == sorted(ticks)
+    steps = {round(b - a, 9) for a, b in itertools.pairwise(ticks)}
+    assert len(steps) == 1
+    step = steps.pop()
+    mant = step / 10 ** np.floor(np.log10(step))
+    assert any(np.isclose(mant, m) for m in (1, 2, 5))
+
+
+def test_config_display_fields(multi_var, tmp_path):
+    _, _, html = _generate(multi_var, tmp_path)
+    cfg = _config(html)
+    by = {v["name"]: v for v in cfg["variables"]}
+    assert by["melt"]["display_name"] == "melt"  # no long_name
+    assert by["melt"]["units_display"] == "m/yr"
+    assert 4 <= len(by["melt"]["ticks"]) <= 6
+    assert all(by["melt"]["vmin"] <= t <= by["melt"]["vmax"] for t in by["melt"]["ticks"])
+    assert not by["mask"].get("ticks")
+    assert cfg["dims"]["time"]["iso"] == [
+        "2020-01-01T00:00:00Z",
+        "2020-02-01T00:00:00Z",
+        "2020-03-01T00:00:00Z",
+    ]
+    # existing keys are unchanged
+    assert by["melt"]["units"] == "m/yr" and by["melt"]["long_name"] == ""
+
+
+def test_config_dim_iso_null_for_numeric(tmp_path):
+    ds = xr.Dataset(
+        {"v": (("depth", "lat", "lon"), np.random.default_rng(0).random((3, 64, 64)))},
+        coords={
+            "depth": [0.0, 10.0, 50.0],
+            "lon": -180 + 2.8125 / 2 + 2.8125 * np.arange(64),
+            "lat": 90 - 1.40625 / 2 - 2.8125 * np.arange(64) * 0.5,
+        },
+    ).rio.write_crs("EPSG:4326")
+    ds["v"].attrs.update(long_name="Temp $T_2$", units="degC")
+    _, _, html = _generate(ds, tmp_path)
+    cfg = _config(html)
+    assert cfg["dims"]["depth"]["iso"] is None
+    [v] = cfg["variables"]
+    assert v["display_name"] == "Temp T₂" and v["units_display"] == "°C"
+
+
+def test_template_layout_hooks(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "dark_nolabels" in html and "light_nolabels" in html
+    assert "['light', 'Light']" in html and "['dark', 'Dark']" in html
+    assert "matchMedia('(prefers-color-scheme: dark)')" in html
+    assert "prefers-color-scheme: dark" in html
+    assert "localStorage" in html
+    assert "getData(" in html
+    assert "overflow-wrap: anywhere" in html and "break-all" not in html
+    assert "location.protocol === 'file:'" in html
