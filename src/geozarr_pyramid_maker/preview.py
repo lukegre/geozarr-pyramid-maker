@@ -17,6 +17,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, quote, urlsplit
 
 import numpy as np
 import pyproj
@@ -339,6 +340,15 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
     return cfg
 
 
+def _is_global(attrs: dict[str, Any]) -> bool:
+    """True for a geographic CRS whose bbox spans the full 360° of longitude."""
+    bbox = attrs.get("spatial:bbox")
+    crs = _crs_from_attrs(attrs)
+    if not bbox or len(bbox) != 4 or crs is None or not crs.is_geographic:
+        return False
+    return abs((bbox[2] - bbox[0]) - 360.0) < 1e-6
+
+
 def read_config(store: str | os.PathLike) -> dict[str, Any]:
     """Collect everything the page needs from the store's root attrs and coarsest level."""
     from .write import _resolve_store
@@ -383,10 +393,188 @@ def read_config(store: str | os.PathLike) -> dict[str, Any]:
         "dims": dims,
         "crs": crs,
         "bbox": attrs.get("spatial:bbox"),
+        "global": _is_global(attrs),
         "ramp": RAMP,
         "colormaps": COLORMAPS,
         "basemap_default": crs["code"] in _BUILTIN_CRS,
     }
+
+
+# --------------------------------------------------------------------------- store checks
+
+_CONVERT_HINT = (
+    "Convert it into a GeoZarr pyramid first: `geozarr-pyramid convert {src} {dst}` "
+    '(or `ds.geozarr.to_pyramid("{dst}")` in Python), then open {dst}.'
+)
+_NON_ZARR_SUFFIXES = {
+    ".nc": "NetCDF",
+    ".nc4": "NetCDF",
+    ".cdf": "NetCDF",
+    ".h5": "HDF5",
+    ".hdf5": "HDF5",
+    ".tif": "GeoTIFF",
+    ".tiff": "GeoTIFF",
+    ".grib": "GRIB",
+    ".grib2": "GRIB",
+    ".grb": "GRIB",
+}
+
+
+class StoreError(ValueError):
+    """A store that cannot be previewed, with a machine-readable ``code`` and a ``hint``."""
+
+    def __init__(self, code: str, message: str, hint: str = "") -> None:
+        super().__init__(message)
+        self.code, self.message, self.hint = code, message, hint
+
+    def __str__(self) -> str:
+        return f"{self.message}\n{self.hint}" if self.hint else self.message
+
+    def to_dict(self) -> dict[str, str]:
+        return {"code": self.code, "message": self.message, "hint": self.hint}
+
+
+class StoreNotFoundError(StoreError, FileNotFoundError):
+    """StoreError for a missing store (also a FileNotFoundError)."""
+
+
+def _pyramid_name(src: str) -> str:
+    stem = src.rstrip("/").rsplit("/", 1)[-1]
+    for suffix in (*_NON_ZARR_SUFFIXES, ".zarr"):
+        if stem.lower().endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return f"{stem or 'output'}_pyramid.zarr"
+
+
+def _convert_hint(src: str) -> str:
+    return _CONVERT_HINT.format(src=src, dst=_pyramid_name(src))
+
+
+def _check_local(path: Path, src: str) -> None:
+    if not path.exists():
+        raise StoreNotFoundError(
+            "not_found",
+            f"Nothing exists at {src!r} (resolved to {path}).",
+            "Check the spelling; relative paths are resolved from the directory the preview "
+            "server was started in.",
+        )
+    if path.is_file():
+        kind = _NON_ZARR_SUFFIXES.get(path.suffix.lower())
+        what = f"a {kind} file" if kind else "a file"
+        raise StoreError(
+            "not_zarr",
+            f"{src!r} is {what}, not a Zarr store (Zarr stores are directories).",
+            _convert_hint(src),
+        )
+    if not (path / "zarr.json").is_file():
+        if (path / ".zgroup").is_file() or (path / ".zarray").is_file():
+            raise StoreError(
+                "zarr_v2",
+                f"{src!r} is a Zarr v2 store; the preview needs a Zarr v3 GeoZarr pyramid.",
+                _convert_hint(src),
+            )
+        raise StoreError(
+            "not_zarr",
+            f"{src!r} is a directory but not a Zarr store (no zarr.json inside).",
+            "Point at the .zarr directory itself, not its parent or a sub-folder.",
+        )
+    try:
+        node = json.loads((path / "zarr.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        raise StoreError("bad_metadata", f"{src}/zarr.json cannot be read: {err}.") from err
+    if node.get("node_type") == "array":
+        raise StoreError(
+            "not_group",
+            f"{src!r} is a single Zarr array, not a group.",
+            "Open the root of the pyramid (the directory holding the level groups 0, 1, 2, …).",
+        )
+
+
+def _open_root(store: str) -> zarr.Group:
+    from .write import _CLOUD_HINT, _resolve_store
+
+    try:
+        zstore = _resolve_store(store)
+    except ImportError as err:
+        raise StoreError("missing_dependency", str(err), f"Try: {_CLOUD_HINT}") from err
+    except Exception as err:
+        raise StoreError("unreachable", f"Cannot open {store!r}: {err}.") from err
+    try:
+        return zarr.open_group(zstore, mode="r")
+    except FileNotFoundError as err:
+        raise StoreNotFoundError(
+            "not_found",
+            f"No Zarr group found at {store!r}.",
+            "Check the URL, and that it points at the root of a Zarr v3 store.",
+        ) from err
+    except PermissionError as err:
+        raise StoreError(
+            "access_denied",
+            f"Access to {store!r} was denied: {err}.",
+            "The preview only reads public data (or data your local credentials can read).",
+        ) from err
+    except Exception as err:
+        msg = str(err) or type(err).__name__
+        low = msg.lower()
+        if "403" in low or "forbidden" in low or "access denied" in low:
+            raise StoreError("access_denied", f"Access to {store!r} was denied: {msg}.") from err
+        if "404" in low or "not found" in low or "nosuchkey" in low:
+            raise StoreNotFoundError("not_found", f"No Zarr group found at {store!r}.") from err
+        raise StoreError("unreachable", f"Cannot read {store!r}: {msg}.") from err
+
+
+def check_store(store: str | os.PathLike) -> dict[str, Any]:
+    """Validate ``store`` for previewing and return its page config, or raise StoreError."""
+    src = str(store).strip()
+    if not src:
+        raise StoreError("empty", "Enter a local path, an https:// URL or an s3:// URL.")
+    if not _is_url(src):
+        _check_local(Path(src).expanduser(), src)
+        src_open = str(Path(src).expanduser())
+    else:
+        src_open = src
+    root = _open_root(src_open)
+    attrs = dict(root.attrs)
+    layout = (attrs.get("multiscales") or {}).get("layout")
+    if not layout:
+        levels = [k for k, _ in root.groups()]
+        extra = f" It has groups {levels[:5]} but no multiscales layout." if levels else ""
+        raise StoreError(
+            "not_pyramid",
+            f"{src!r} is a Zarr store but not a GeoZarr multiscale pyramid "
+            f"(no `multiscales.layout` in its root attributes).{extra}",
+            _convert_hint(src),
+        )
+    try:
+        return read_config(src_open)
+    except StoreError:
+        raise
+    except Exception as err:
+        raise StoreError(
+            "invalid_pyramid",
+            f"{src!r} looks like a pyramid but cannot be previewed: {err}",
+            f"Check it with `geozarr-pyramid validate {src}`, or re-create it with "
+            f"`geozarr-pyramid convert`.",
+        ) from err
+
+
+def browser_url(store: str) -> str:
+    """The http(s) URL a browser can fetch a remote store from (public buckets only)."""
+    parts = urlsplit(store)
+    scheme = parts.scheme.lower()
+    if scheme in ("http", "https"):
+        return store
+    bucket, key = parts.netloc, parts.path.lstrip("/")
+    if scheme == "s3":
+        return f"https://{bucket}.s3.amazonaws.com/{quote(key)}"
+    if scheme in ("gs", "gcs"):
+        return f"https://storage.googleapis.com/{bucket}/{quote(key)}"
+    raise StoreError(
+        "unsupported_scheme",
+        f"The browser cannot read {scheme}:// URLs.",
+        "Use a local path, an https:// URL or a public s3:// / gs:// URL.",
+    )
 
 
 # --------------------------------------------------------------------------- html
@@ -439,7 +627,46 @@ class RangeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        if urlsplit(self.path).path == "/api/open":
+            self._api_open()
+            return
         self._send_file(head=False)
+
+    def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, allow_nan=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _api_open(self) -> None:
+        query = parse_qs(urlsplit(self.path).query)
+        src = (query.get("store") or [""])[0]
+        try:
+            config = check_store(src)
+            if _is_url(src):
+                config["store_url"] = browser_url(src)
+            else:
+                config["store_url"] = _mount(self.server, Path(src).expanduser())
+        except StoreError as err:
+            logger.info("preview: cannot open {!r}: {}", src, err.message)
+            self._send_json(HTTPStatus.OK, {"ok": False, "error": err.to_dict()})
+            return
+        config["source"] = src
+        self._send_json(HTTPStatus.OK, {"ok": True, "config": config})
+
+    def translate_path(self, path: str) -> str:
+        mounts = getattr(self.server, "mounts", {})
+        parts = urlsplit(path).path.split("/")
+        if len(parts) > 2 and parts[1] == MOUNT_PREFIX and parts[2] in mounts:
+            base = mounts[parts[2]]
+            rel = posixpath.normpath("/".join(parts[3:]) or ".")
+            if rel.startswith(".."):
+                return str(base / "__outside__")
+            return str(base / rel)
+        return super().translate_path(path)
 
     def do_HEAD(self) -> None:
         self._send_file(head=True)
@@ -505,6 +732,21 @@ class RangeHandler(SimpleHTTPRequestHandler):
             logger.debug("preview server: client closed the connection")
 
 
+MOUNT_PREFIX = "_stores"
+
+
+def _mount(server: Any, path: Path) -> str:
+    """Serve a local store under /_stores/<n>/ and return its absolute URL path."""
+    mounts: dict[str, Path] = server.__dict__.setdefault("mounts", {})
+    path = path.resolve()
+    for key, base in mounts.items():
+        if base == path:
+            return f"/{MOUNT_PREFIX}/{key}/"
+    key = str(len(mounts))
+    mounts[key] = path
+    return f"/{MOUNT_PREFIX}/{key}/"
+
+
 def make_server(root: str | os.PathLike, port: int = 8000) -> ThreadingHTTPServer:
     """A threaded server on 127.0.0.1 serving ``root`` (use port 0 for a free port)."""
     handler = functools.partial(RangeHandler, directory=str(root))
@@ -528,15 +770,17 @@ def preview(
     remote = _is_url(store)
     if remote and serve:
         raise ValueError("serve=True needs a local store; remote URLs can only get an HTML page.")
-    config = read_config(store)
+    config = check_store(store)
     name = config["title"]
     if remote:
         out_path = Path(out) if out else Path.cwd() / f"{name}.preview.html"
         config["store_url"] = str(store)
+        config["source"] = str(store)
     else:
         store_path = Path(store).resolve()
         out_path = Path(out) if out else store_path.parent / f"{name}.preview.html"
         config["store_url"] = _relative_url(store_path, out_path.parent)
+        config["source"] = str(store)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(render_html(config), encoding="utf-8")
     logger.info("Preview page written to {}", out_path)
