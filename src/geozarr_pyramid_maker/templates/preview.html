@@ -77,6 +77,11 @@
     font: inherit; text-overflow: ellipsis; }
   #storepath:hover { border-color: var(--card-line); }
   #storepath:focus { border-color: #4a90e2; outline: none; }
+  /* expand to the full window width while focused (or busy submitting); the h1 keeps its height */
+  #sbhead h1 { min-height: 22.5px; }
+  #storepath:focus, #storepath.busy { position: fixed; z-index: 20; top: 9px; left: var(--sp); right: var(--sp);
+    width: auto; margin: 0; padding: 6px 10px; text-overflow: clip; background: var(--sidebar);
+    box-shadow: var(--shadow); }
   #storepath.busy { opacity: .6; }
   #storeerr { margin: 6px 16px 4px; padding: 8px 10px; border-radius: 6px; font-size: 12px;
     line-height: 1.4; border: 1px solid #d1242f; background: rgba(209, 36, 47, .1); overflow-wrap: anywhere; }
