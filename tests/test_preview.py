@@ -745,6 +745,14 @@ def test_template_store_picker(tiny, tmp_path):
     assert "searchParams.set('store'" in html
 
 
+def test_template_storepath_expands_on_focus(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    rule = html.split("#storepath:focus, #storepath.busy {", 1)[1].split("}", 1)[0]
+    assert "position: fixed" in rule and "z-index: 20" in rule
+    assert "left: var(--sp)" in rule and "right: var(--sp)" in rule
+    assert "#sbhead h1 { min-height:" in html
+
+
 def test_template_url_state(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "history.replaceState" in html and "function syncUrl" in html
