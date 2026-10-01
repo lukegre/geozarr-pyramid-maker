@@ -115,6 +115,7 @@
   .card .top { display: flex; align-items: flex-start; gap: var(--sp); }
   .card .name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
   .card .meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
+  #selhint { padding: 0 var(--sp); margin-top: var(--sp); font-size: 11px; color: var(--muted); }
   .card .gear { display: none; }
   .card.active .gear { display: grid; }
   .card .gear[aria-expanded="true"] { background: var(--hover); color: var(--text); }
@@ -233,6 +234,7 @@
       placeholder="https://os.zhdk.cloud.switch.ch"
       title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
   </div>
+  <div id="selhint" hidden>Click cards to show several variables at once; the last one selected is drawn on top.</div>
   <div id="cards"></div>
   <div id="sbfoot">
     <label for="basemap">Basemap</label>
@@ -466,13 +468,23 @@ function colorExpr(v) {
   return expr;
 }
 
-const state = {active: blank ? null : cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null, layers: [], sources: [],
-  map: null, scrub: null, timer: null, optionsOpen: false};
-const cur = () => cfg.variables.find((v) => v.name === state.active);
+// selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources}.
+const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, opacity: {}, vlayers: new window.Map(),
+  map: null, scrub: null, scrubKey: null, timer: null, open: new Set()};
+const varOf = (name) => cfg.variables.find((v) => v.name === name);
+const selVars = () => state.selected.map(varOf);
+const opacityOf = (name) => (state.opacity[name] === undefined ? 1 : state.opacity[name]);
+// Union of the extra dims of the selected variables: selection order, then each variable's dim order.
+const unionDims = () => {
+  const out = [];
+  for (const v of selVars()) for (const d of v.dims) if (!out.includes(d)) out.push(d);
+  return out;
+};
 
 // ------------------------------------------------------------------ shareable URL
-// The URL mirrors the view: store, var, one parameter per dim of the active variable (ISO date
-// for time-like dims, else index), cmap, rev, vmin, vmax, opacity, lon and the map view (x, y, z).
+// The URL mirrors the view: store, var (comma-separated), one parameter per dim of the selected
+// variables (ISO date for time-like dims, else index), cmap, rev, vmin, vmax, opacity (suffixed
+// `.<var>` with several variables), lon and the map view (x, y, z).
 // URL values win over remembered (localStorage) ones, so a shared link reproduces the view.
 const dimToParam = (d, i) => {
   const iso = cfg.dims[d].iso;
@@ -487,27 +499,50 @@ function dimFromParam(d, raw) {
   const i = Number(raw);
   return Number.isInteger(i) && i >= 0 && i < size ? i : null;
 }
+// Style/opacity parameters: plain names for one selected variable, `<param>.<var>` for several.
+// On load a plain parameter applies to the first selected variable.
+function styleParams(vars) {
+  const multi = vars.length > 1, out = [];
+  for (const v of vars) {
+    const key = (k) => (multi ? `${k}.${v.name}` : k);
+    if (!v.categorical) {
+      const st = styleOf(v);
+      out.push([key('cmap'), st.cmap]);
+      if (st.reversed) out.push([key('rev'), '1']);
+      out.push([key('vmin'), String(+Number(st.vmin).toPrecision(6))]);
+      out.push([key('vmax'), String(+Number(st.vmax).toPrecision(6))]);
+    }
+    if (opacityOf(v.name) !== 1) out.push([key('opacity'), String(opacityOf(v.name))]);
+  }
+  return out;
+}
 (function applyUrlState() {
   if (blank) return;
-  const v0 = params.get('var');
-  if (v0 && cfg.variables.some((v) => v.name === v0)) state.active = v0;
+  const names = [];
+  for (const n of (params.get('var') || '').split(',')) if (varOf(n) && !names.includes(n)) names.push(n);
+  if (names.length) state.selected = names;
   for (const d of Object.keys(cfg.dims)) {
     const raw = params.get(d);
     if (raw === null) continue;
     const i = dimFromParam(d, raw);
     if (i !== null) state.dims[d] = i;
   }
-  const op = Number(params.get('opacity'));
-  if (params.has('opacity') && op >= 0 && op <= 1) state.opacity = op;
-  const v = cur();
-  const st = {...styleOf(v)};
-  const cm = params.get('cmap');
-  if (cm && cmaps[cm]) st.cmap = cm;
-  if (params.has('rev')) st.reversed = params.get('rev') === '1';
-  const lo = Number(params.get('vmin')), hi = Number(params.get('vmax'));
-  if (params.has('vmin') && Number.isFinite(lo)) st.vmin = lo;
-  if (params.has('vmax') && Number.isFinite(hi)) st.vmax = hi;
-  if (st.vmin < st.vmax) styles[v.name] = st;
+  state.selected.forEach((name, idx) => {
+    const v = varOf(name);
+    const get = (k) => (params.has(`${k}.${name}`) ? params.get(`${k}.${name}`) : (idx === 0 && params.has(k) ? params.get(k) : null));
+    const op = get('opacity');
+    if (op !== null && Number(op) >= 0 && Number(op) <= 1) state.opacity[name] = Number(op);
+    if (v.categorical) return;
+    const st = {...styleOf(v)};
+    const cm = get('cmap');
+    if (cm && cmaps[cm]) st.cmap = cm;
+    const rv = get('rev');
+    if (rv !== null) st.reversed = rv === '1';
+    const lo = get('vmin'), hi = get('vmax');
+    if (lo !== null && lo !== '' && Number.isFinite(Number(lo))) st.vmin = Number(lo);
+    if (hi !== null && hi !== '' && Number.isFinite(Number(hi))) st.vmax = Number(hi);
+    if (st.vmin < st.vmax) styles[name] = st;
+  });
 })();
 
 let urlTimer = null;
@@ -517,17 +552,12 @@ function syncUrl() {
     const q = new URLSearchParams();
     if (blank) q.set('store', '');
     else {
-      const v = cur();
-      const st = styleOf(v);
+      const vars = selVars();
       q.set('store', cfg.source);
       if (cfg.endpoint && /^s3:\/\//i.test(cfg.source)) q.set('endpoint', cfg.endpoint);
-      q.set('var', v.name);
-      for (const d of v.dims) q.set(d, dimToParam(d, state.dims[d] || 0));
-      q.set('cmap', st.cmap);
-      if (st.reversed) q.set('rev', '1');
-      q.set('vmin', String(+Number(st.vmin).toPrecision(6)));
-      q.set('vmax', String(+Number(st.vmax).toPrecision(6)));
-      if (state.opacity !== 1) q.set('opacity', String(state.opacity));
+      q.set('var', state.selected.join(','));
+      for (const d of unionDims()) q.set(d, dimToParam(d, state.dims[d] || 0));
+      for (const [k, val] of styleParams(vars)) q.set(k, val);
     }
     if (cfg.global) q.set('lon', String(state.centerLon));
     const view = state.map && state.map.getView();
@@ -536,7 +566,7 @@ function syncUrl() {
       q.set('x', c[0].toPrecision(6)); q.set('y', c[1].toPrecision(6));
       q.set('z', view.getZoom().toFixed(2));
     }
-    history.replaceState(null, '', `${location.pathname}?${q.toString().replace(/%2F/g, '/').replace(/%3A/g, ':')}`);
+    history.replaceState(null, '', `${location.pathname}?${q.toString().replace(/%2F/g, '/').replace(/%3A/g, ':').replace(/%2C/g, ',')}`);
   }, 150);
 }
 const unitsOf = (v) => v.units_display ?? v.units ?? '';
@@ -632,7 +662,7 @@ function buildCards() {
     card.append(legend);
     const opts = h('div', 'opts');
     const slider = h('input');
-    slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = state.opacity;
+    slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = opacityOf(v.name);
     slider.setAttribute('aria-label', 'Opacity');
     const orow = h('div', 'row');
     const olab = h('label', '', 'Opacity');
@@ -642,25 +672,26 @@ function buildCards() {
     if (!v.categorical) entry.sync = buildStyleControls(v, opts, entry);
     opts.addEventListener('click', (e) => e.stopPropagation());
     card.append(opts);
-    card.addEventListener('click', () => setActive(v.name));
+    card.addEventListener('click', () => toggleVar(v.name));
     card.addEventListener('keydown', (e) => {
-      if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setActive(v.name); }
+      if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleVar(v.name); }
     });
     gear.addEventListener('click', (e) => {
       e.stopPropagation();
-      state.optionsOpen = !state.optionsOpen;
+      if (state.open.has(v.name)) state.open.delete(v.name); else state.open.add(v.name);
       refreshCards();
     });
     slider.addEventListener('click', (e) => e.stopPropagation());
     slider.addEventListener('input', () => {
-      state.opacity = +slider.value;
-      for (const l of state.layers) l.setOpacity(state.opacity);
+      state.opacity[v.name] = +slider.value;
+      const vl = state.vlayers.get(v.name);
+      if (vl) for (const l of vl.layers) l.setOpacity(state.opacity[v.name]);
       syncUrl();
-      for (const c of cards.values()) c.slider.value = slider.value;
     });
     cards.set(v.name, entry);
     box.append(card);
   }
+  $('selhint').hidden = cfg.variables.length < 2;
 }
 
 function buildStyleControls(v, opts, entry) {
@@ -717,10 +748,8 @@ function buildStyleControls(v, opts, entry) {
     sync();
     if (clear) store.remove(styleKey(v)); else store.set(styleKey(v), JSON.stringify(styleOf(v)));
     syncUrl();
-    if (v.name === state.active && state.layer) {
-      for (const l of state.layers) if (typeof l.setStyle === 'function') l.setStyle({color: colorExpr(v)});
-      else replaceLayer();
-    }
+    const vl = state.vlayers.get(v.name);
+    if (vl) for (const l of vl.layers) l.setStyle({color: colorExpr(v)});
   };
   const setRange = () => {
     const a = parseFloat(minIn.value), b = parseFloat(maxIn.value);
@@ -751,11 +780,12 @@ function buildStyleControls(v, opts, entry) {
 
 function refreshCards() {
   for (const [name, c] of cards) {
-    const active = name === state.active;
+    const active = state.selected.includes(name);
+    const open = active && state.open.has(name);
     c.el.classList.toggle('active', active);
-    c.el.classList.toggle('open', active && state.optionsOpen);
+    c.el.classList.toggle('open', open);
     c.el.setAttribute('aria-pressed', String(active));
-    c.gear.setAttribute('aria-expanded', String(active && state.optionsOpen));
+    c.gear.setAttribute('aria-expanded', String(open));
   }
 }
 
@@ -865,25 +895,30 @@ function stopPlay() {
 function setDim(name, i) {
   state.dims[name] = i;
   syncUrl();
-  for (const src of state.sources) src.updateDimensions({[name]: i});
+  for (const [vn, vl] of state.vlayers) {
+    if (!varOf(vn).dims.includes(name)) continue;
+    for (const src of vl.sources) src.updateDimensions({[name]: i});
+  }
 }
 
-function buildScrubber(v) {
+function buildScrubber() {
   stopPlay();
   state.scrub = null;
+  const dimNames = unionDims();
+  state.scrubKey = dimNames.join('\u0000');
   const bar = $('scrubber'), stack = $('dimstack');
   bar.innerHTML = ''; stack.innerHTML = '';
-  bar.hidden = v.dims.length === 0;
-  stack.hidden = v.dims.length < 2;
-  document.body.classList.toggle('has-scrub', v.dims.length > 0);
-  if (!v.dims.length) return;
-  for (const name of v.dims) {
+  bar.hidden = dimNames.length === 0;
+  stack.hidden = dimNames.length < 2;
+  document.body.classList.toggle('has-scrub', dimNames.length > 0);
+  if (!dimNames.length) return;
+  for (const name of dimNames) {
     const size = cfg.dims[name].size;
     state.dims[name] = clamp(state.dims[name] || 0, 0, size - 1);
   }
 
   // main scrubber: first extra dim
-  const name = v.dims[0];
+  const name = dimNames[0];
   const d = cfg.dims[name];
   const n = d.size;
   const {pos, timed, lo, hi} = stepPositions(d);
@@ -977,7 +1012,7 @@ function buildScrubber(v) {
   layoutLabels();
 
   // further dims (e.g. depth): compact vertical sliders
-  for (const extra of v.dims.slice(1)) {
+  for (const extra of dimNames.slice(1)) {
     const ed = cfg.dims[extra];
     const item = h('div', 'dim');
     const val = h('span', 'val', String(dimLabel(ed, state.dims[extra])));
@@ -1020,10 +1055,10 @@ function shiftGrid(grid, dx) {
   });
 }
 
-function makeLayers() {
+function makeLayers(v) {
   const offsets = cfg.global ? [0, -360, 360] : [0];
   const made = offsets.map((dx) => {
-    const m = makeLayer();
+    const m = makeLayer(v);
     if (dx) {
       const shift = () => {
         if (m.source.getState() !== 'ready' || m.source.gpmShifted) return;
@@ -1035,7 +1070,7 @@ function makeLayers() {
     }
     return m;
   });
-  return {source: made[0].source, layer: made[0].layer, sources: made.map((m) => m.source), layers: made.map((m) => m.layer)};
+  return {sources: made.map((m) => m.source), layers: made.map((m) => m.layer)};
 }
 
 function viewFor(opts) {
@@ -1049,8 +1084,7 @@ function viewFor(opts) {
   return pinned ? {...opts, center: [x, y], zoom: z} : opts;
 }
 
-function makeLayer() {
-  const v = cur();
+function makeLayer(v) {
   const dimensions = {};
   for (const n of v.dims) dimensions[n] = clamp(state.dims[n] || 0, 0, cfg.dims[n].size - 1);
   const opts = {url: storeUrl, bands: [v.name], transition: 0};
@@ -1059,7 +1093,7 @@ function makeLayer() {
   const source = new GeoZarr(opts);
   source.addEventListener?.('error', showError);
   return {source, layer: new WebGLTileLayer({
-    source, style: {color: colorExpr(v)}, opacity: state.opacity})};
+    source, style: {color: colorExpr(v)}, opacity: opacityOf(v.name)})};
 }
 
 function updateSpine() {
@@ -1067,29 +1101,37 @@ function updateSpine() {
     $('sbspine').firstElementChild.replaceChildren(h('i', null, 'no store loaded'));
     return;
   }
-  const v = cur();
+  const names = selVars().map((v) => v.display_name || v.name).join(', ');
   const span = $('sbspine').firstElementChild;
-  span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '),
-    h('i', null, v.display_name || v.name));
-  $('sbspine').title = `${cfg.source || cfg.title} · ${v.display_name || v.name}`;
+  span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '), h('i', null, names));
+  $('sbspine').title = `${cfg.source || cfg.title} · ${names}`;
 }
 
-function setActive(name) {
-  if (name === state.active) return;
-  state.active = name;
+// Add or remove one variable's layer group; other variables' layers are left untouched.
+function addVariable(name) {
+  const vl = makeLayers(varOf(name));
+  state.vlayers.set(name, vl);
+  for (const l of vl.layers) state.map.getLayers().push(l);  // above the existing data layers
+}
+
+function removeVariable(name) {
+  const vl = state.vlayers.get(name);
+  if (!vl) return;
+  for (const l of vl.layers) { state.map.getLayers().remove(l); l.dispose?.(); }
+  state.vlayers.delete(name);
+}
+
+function toggleVar(name) {
+  const i = state.selected.indexOf(name);
+  if (i >= 0 && state.selected.length === 1) return;  // keep at least one selected
+  stopPlay();
+  if (i >= 0) { state.selected.splice(i, 1); removeVariable(name); }
+  else { state.selected.push(name); addVariable(name); }
   syncUrl();
   updateSpine();
   refreshCards();
-  buildScrubber(cur());
-  replaceLayer();
+  if (state.scrubKey !== unionDims().join('\u0000')) buildScrubber();
   $('readout').hidden = true;
-}
-
-function replaceLayer() {
-  const next = makeLayers();
-  for (const l of state.layers) { state.map.getLayers().remove(l); l.dispose?.(); }
-  for (const l of next.layers) state.map.getLayers().push(l);
-  Object.assign(state, next);
 }
 
 function initCenterLon() {
@@ -1135,18 +1177,25 @@ function initReadout(map) {
   const ro = $('readout');
   const hide = () => { ro.hidden = true; };
   map.on('pointermove', (e) => {
-    if (e.dragging || !state.layer) return hide();
-    let val = null;
-    try {
-      for (const l of state.layers) {
-        const data = l.getData(e.pixel);
-        if (data && data.length && Number.isFinite(data[0])) { val = data[0]; break; }
-      }
-    } catch (_) { /* layer not rendered yet */ }
-    if (val === null || !Number.isFinite(val)) return hide();
-    const v = cur();
-    const u = unitsOf(v);
-    ro.textContent = v.categorical ? String(val) : `${+Number(val).toPrecision(4)}${u ? ` ${u}` : ''}`;
+    if (e.dragging || !state.vlayers.size) return hide();
+    const lines = [];
+    for (const name of [...state.selected].reverse()) {  // top-most first
+      const vl = state.vlayers.get(name);
+      if (!vl) continue;
+      let val = null;
+      try {
+        for (const l of vl.layers) {
+          const data = l.getData(e.pixel);
+          if (data && data.length && Number.isFinite(data[0])) { val = data[0]; break; }
+        }
+      } catch (_) { /* layer not rendered yet */ }
+      if (val === null || !Number.isFinite(val)) continue;
+      const v = varOf(name);
+      const u = unitsOf(v);
+      lines.push(`${v.display_name || v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
+    }
+    if (!lines.length) return hide();
+    ro.replaceChildren(...lines.map((t) => h('div', '', t)));
     ro.hidden = false;
     const o = e.originalEvent;
     const w = ro.offsetWidth, hgt = ro.offsetHeight;
@@ -1177,14 +1226,15 @@ function init() {
   }
   buildCards();
   refreshCards();
-  buildScrubber(cur());
-  Object.assign(state, makeLayers());
+  buildScrubber();
+  for (const name of state.selected) state.vlayers.set(name, makeLayers(varOf(name)));
+  const dataLayers = state.selected.flatMap((n) => state.vlayers.get(n).layers);
   // Pass a promise: Map's `view` option accepts Promise<ViewOptions> and resolves it. The resolved
   // options are adjusted for the centre longitude.
-  const view = getView(state.source, withLowerResolutions(1), withHigherResolutions(2),
+  const view = getView(state.vlayers.get(state.selected[0]).sources[0], withLowerResolutions(1), withHigherResolutions(2),
     withExtentCenter(), withZoom(2)).then(viewFor);
   view.catch(showError);
-  state.map = new Map({target: 'map', layers: [...basemaps, ...state.layers], view});
+  state.map = new Map({target: 'map', layers: [...basemaps, ...dataLayers], view});
   initReadout(state.map);
   state.map.on('moveend', syncUrl);
   syncUrl();

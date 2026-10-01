@@ -146,7 +146,7 @@ def test_view_promise_not_awaited(tiny, tmp_path):
     # Map's `view` option takes Promise<ViewOptions>; awaiting it hands Map a plain object.
     _, _, html = _generate(tiny, tmp_path)
     assert "await getView" not in html
-    assert "getView(state.source" in html
+    assert "getView(state.vlayers.get(state.selected[0]).sources[0]" in html
 
 
 def test_missing_store(tmp_path):
@@ -764,9 +764,35 @@ def test_template_topbar(tiny, tmp_path):
 def test_template_url_state(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "history.replaceState" in html and "function syncUrl" in html
-    for key in ("'store'", "'var'", "'cmap'", "'rev'", "'vmin'", "'vmax'", "'x'", "'z'"):
+    for key in ("'store'", "'var'", "'x'", "'z'"):
         assert f"q.set({key}" in html
+    for key in (
+        "'cmap'",
+        "'rev'",
+        "'vmin'",
+        "'vmax'",
+        "'opacity'",
+    ):  # via styleParams (suffixed per var)
+        assert f"key({key})" in html
     assert "applyUrlState" in html and "state.map.on('moveend', syncUrl)" in html
+    assert "q.set('var', state.selected.join(','))" in html
+
+
+def test_template_multi_variable_selection(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "state.active" not in html and "optionsOpen" not in html and "state.layers" not in html
+    assert "state.selected" in html and "state.vlayers" in html and "state.open" in html
+    assert (
+        "function toggleVar" in html
+        and "function addVariable" in html
+        and "function removeVariable" in html
+    )
+    assert "state.selected.length === 1" in html  # at least one stays selected
+    assert "function unionDims" in html or "const unionDims" in html
+    assert "function styleParams" in html and "`${k}.${v.name}`" in html
+    assert "state.opacity[v.name]" in html and 'id="selhint"' in html
+    assert "varOf(vn).dims.includes(name)" in html  # setDim only touches variables with that dim
+    assert "[...state.selected].reverse()" in html  # readout: top-most first
 
 
 def test_template_collapsed_spine(tiny, tmp_path):
