@@ -651,6 +651,27 @@ def test_endpoint_options_signed_with_credentials(backend, var, monkeypatch):
         assert _s3_endpoint_options("https://e.org") == {"endpoint": "https://e.org"}
 
 
+def test_endpoint_options_http_obstore_uses_client_options(monkeypatch):
+    from geozarr_pyramid_maker.write import _s3_endpoint_options
+
+    pytest.importorskip("obstore")
+    for k in _CRED_VARS:
+        monkeypatch.delenv(k, raising=False)
+    opts = _s3_endpoint_options("http://example.org")
+    assert opts["client_options"] == {"allow_http": True}
+    assert "allow_http" not in opts
+    assert "client_options" not in _s3_endpoint_options("https://example.org")
+
+
+def test_endpoint_options_http_obstore_from_url_does_not_panic(monkeypatch):
+    from geozarr_pyramid_maker.write import _s3_endpoint_options
+
+    obstore_store = pytest.importorskip("obstore.store")
+    for k in _CRED_VARS:
+        monkeypatch.delenv(k, raising=False)
+    obstore_store.from_url("s3://bucket/key", **_s3_endpoint_options("http://example.org"))
+
+
 @pytest.mark.network
 def test_check_store_public_s3_with_endpoint(monkeypatch):
     for k in _CRED_VARS:
