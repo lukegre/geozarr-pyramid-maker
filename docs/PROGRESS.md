@@ -2,7 +2,7 @@
 
 ## Status
 - Phase: v0.1 feature-complete (M0–M6 done)
-- Last updated: 2026-09-29
+- Last updated: 2026-10-01
 
 ## Log
 | Date | Step | Status | Notes |
@@ -39,6 +39,7 @@
 | 2026-09-29 | Open follow-ups | open | peak RSS about 1.6 GiB on the 650 MiB test (threads × shard size); OL per-level resolution vs padding (research/03); GDAL 3.13 Zarr-driver test untested (bundled GDAL 3.12.4); CI not yet run on GitHub; pre-commit-hooks rev v5.0.0; no push/PyPI yet |
 | 2026-09-29 | Preview layout redesign | done | collapsible sidebar with per-variable cards and legends (nice ticks, display names, µatm-style units), bottom time scrubber (play/step/keys, date-positioned ticks), in-page colourmap/min/max/symmetric/reset/reversed controls persisted in localStorage, keyless OSM basemaps (Light/Dark via CSS filters, OSM, None), value readout, light/dark theme; centre-longitude control was added then reverted (8b33750) – see D-24; user ran uv sync --all-extras, pytest, ruff on main: all pass; merged to main at a68aedb (fast-forward of feat/preview-layout); note subagent escalation to Sonnet:high for wrapX diagnosis |
 | 2026-09-29 | Viewer: settings cog + S3 endpoint field | done | (i) button is now settings cog; panel: S3 endpoint URL field (s3:// paths only); endpoint via ?endpoint= → /api/open → check_store(endpoint=); write._s3_endpoint_options maps endpoint to obstore (endpoint + skip_signature) / fsspec (endpoint_url/anon); browser_url uses path-style URLs for custom endpoints; verified vs s3://spi-pamir-public/test/oceansoda_dfco2.zarr on https://os.zhdk.cloud.switch.ch; OPEN: bucket lacks CORS rules (blocks browser tile fetch); OPEN: tests/test_write.py imports obstore unconditionally (breaks plain uv sync); merged 28a9dc4 |
+| 2026-10-01 | Viewer UI update merged to main (merge 476fa13; commits 66b1680, fa991cd) | done | (1) store path box now full-width top bar fixed at top, hidden when sidebar collapses; (2) S3 endpoint field moved into sidebar, shown automatically for s3:// inputs; (3) sun/settings button replaced by info button whose panel shows Metadata and Global attributes tables (new config keys `attrs`, `levels`); (4) multiple variables selectable at once (toggle cards, ≥1 selected, stacking = selection order, per-variable opacity/style, scrubber = union of dims, per-variable readout, URL `var=a,b` and `param.<var>`). Decisions D-32, D-33. Checks: 661 passed, ruff clean; browser-checked with 3-variable test pyramid. |
 
 ## Next step (for the next agent)
 Push to GitHub and check CI (py3.12–3.14); user browser check of the preview; decide on the follow-ups above; then tag v0.1.0.
