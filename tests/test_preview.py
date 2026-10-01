@@ -146,7 +146,7 @@ def test_view_promise_not_awaited(tiny, tmp_path):
     # Map's `view` option takes Promise<ViewOptions>; awaiting it hands Map a plain object.
     _, _, html = _generate(tiny, tmp_path)
     assert "await getView" not in html
-    assert "getView(state.source" in html
+    assert "getView(state.vlayers.get(state.selected[0]).sources[0]" in html
 
 
 def test_missing_store(tmp_path):
@@ -703,14 +703,20 @@ def test_api_open_bad_endpoint(tmp_path):
     assert err["ok"] is False and err["error"]["code"] == "bad_endpoint" and err["error"]["hint"]
 
 
-def test_template_settings_panel(tiny, tmp_path):
+def test_template_info_panel(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
-    assert "infobtn" not in html and "infopanel" not in html
-    assert 'id="settingsbtn"' in html and 'aria-label="Settings"' in html
-    assert 'id="settingspanel"' in html and 'id="endpoint"' in html
-    assert "S3 endpoint URL" in html and "os.zhdk.cloud.switch.ch" in html
+    assert "settingsbtn" not in html and "settingspanel" not in html
+    assert 'id="topbar"' in html and 'id="infobtn"' in html and 'id="infopanel"' in html
+    assert 'aria-label="Dataset information"' in html
+    panel = html.split('id="infopanel"', 1)[1].split("</div>", 1)[0]
+    assert "s3row" not in panel and "endpoint" not in panel
+    assert html.index('id="s3row"') > html.index('id="topbar"')
+    assert html.index('id="s3row"') < html.index('id="cards"')
+    assert 'id="endpoint"' in html and "S3 endpoint URL" in html
+    assert "os.zhdk.cloud.switch.ch" in html
     assert "api/open?store=" in html and "&endpoint=" in html
     assert "q.set('endpoint'" in html
+    assert "Global attributes" in html and "cfg.attrs" in html
 
 
 def test_cli_preview_explains_bad_store(tiny, tmp_path):
@@ -745,20 +751,48 @@ def test_template_store_picker(tiny, tmp_path):
     assert "searchParams.set('store'" in html
 
 
-def test_template_storepath_expands_on_focus(tiny, tmp_path):
+def test_template_topbar(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
-    rule = html.split("#storepath:focus, #storepath.busy {", 1)[1].split("}", 1)[0]
-    assert "position: fixed" in rule and "z-index: 20" in rule
-    assert "left: var(--sp)" in rule and "right: var(--sp)" in rule
-    assert "#sbhead h1 { min-height:" in html
+    assert "#storepath:focus, #storepath.busy {" not in html
+    rule = html.split("#topbar {", 1)[1].split("}", 1)[0]
+    assert "position: fixed" in rule and "left: 0" in rule and "right: 0" in rule
+    assert "--top-h" in html and "body.collapsed { --sb-w: 44px; --top-h: 0px; }" in html
+    assert html.index('id="topbar"') < html.index('id="storepath"') < html.index('id="infobtn"')
+    assert "state.map?.updateSize()" in html
 
 
 def test_template_url_state(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "history.replaceState" in html and "function syncUrl" in html
-    for key in ("'store'", "'var'", "'cmap'", "'rev'", "'vmin'", "'vmax'", "'x'", "'z'"):
+    for key in ("'store'", "'var'", "'x'", "'z'"):
         assert f"q.set({key}" in html
+    for key in (
+        "'cmap'",
+        "'rev'",
+        "'vmin'",
+        "'vmax'",
+        "'opacity'",
+    ):  # via styleParams (suffixed per var)
+        assert f"key({key})" in html
     assert "applyUrlState" in html and "state.map.on('moveend', syncUrl)" in html
+    assert "q.set('var', state.selected.join(','))" in html
+
+
+def test_template_multi_variable_selection(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "state.active" not in html and "optionsOpen" not in html and "state.layers" not in html
+    assert "state.selected" in html and "state.vlayers" in html and "state.open" in html
+    assert (
+        "function toggleVar" in html
+        and "function addVariable" in html
+        and "function removeVariable" in html
+    )
+    assert "state.selected.length === 1" in html  # at least one stays selected
+    assert "function unionDims" in html or "const unionDims" in html
+    assert "function styleParams" in html and "`${k}.${v.name}`" in html
+    assert "state.opacity[v.name]" in html and 'id="selhint"' in html
+    assert "varOf(vn).dims.includes(name)" in html  # setDim only touches variables with that dim
+    assert "[...state.selected].reverse()" in html  # readout: top-most first
 
 
 def test_template_collapsed_spine(tiny, tmp_path):
@@ -1099,3 +1133,71 @@ def test_read_config_https_store_without_listing():
     )
     assert "dfco2" in [v["name"] for v in cfg["variables"]]
     assert "time" in cfg["dims"]
+
+
+# --------------------------------------------------------------------------- attrs and levels
+
+
+def test_global_attrs_filters_machinery():
+    attrs = {
+        "title": "T",
+        "institution": "ETH",
+        "multiscales": {"layout": []},
+        "zarr_conventions": [],
+        "proj:code": "EPSG:4326",
+        "spatial:bbox": [0, 0, 1, 1],
+        pv.VARIABLES_ATTR: ["a"],
+    }
+    assert pv._global_attrs(attrs) == {"title": "T", "institution": "ETH"}
+    assert list(pv._global_attrs({"b": 1, "a": 2})) == ["b", "a"]
+
+
+def test_global_attrs_json_safe():
+    out = pv._global_attrs(
+        {
+            "nan": float("nan"),
+            "inf": float("inf"),
+            "n": 3,
+            "f": 1.5,
+            "np": np.float32(2.5),
+            "npi": np.int64(4),
+            "list": ["a", 1, 2.5],
+            "dict": {"k": float("nan")},
+            "none": None,
+            "flag": True,
+        }
+    )
+    json.dumps(out, allow_nan=False)
+    assert out["n"] == 3 and out["f"] == 1.5 and out["np"] == 2.5 and out["npi"] == 4
+    assert out["nan"] == "nan" and out["inf"] == "inf"
+    assert out["list"] == "a, 1, 2.5"
+    assert isinstance(out["dict"], str) and "k" in out["dict"]
+    assert isinstance(out["none"], str) and isinstance(out["flag"], str)
+
+
+def test_global_attrs_truncates():
+    out = pv._global_attrs({"long": "x" * 5000, "ok": "y" * 2000})
+    assert len(out["long"]) == 2001 and out["long"].endswith("…")
+    assert out["ok"] == "y" * 2000
+
+
+def test_read_config_attrs_and_levels(tiny, tmp_path):
+    ds = tiny.copy()
+    ds.attrs.update(title="My title", institution="SDSC", bad=float("nan"))
+    store = _pyramid(ds, tmp_path)
+    cfg = pv.read_config(store)
+    assert cfg["attrs"]["title"] == "My title" and cfg["attrs"]["institution"] == "SDSC"
+    assert not {"multiscales", "zarr_conventions", pv.VARIABLES_ATTR} & set(cfg["attrs"])
+    assert not any(k.startswith(("proj:", "spatial:")) for k in cfg["attrs"])
+    import zarr
+
+    n = len(zarr.open_group(store, mode="r").attrs["multiscales"]["layout"])
+    assert cfg["levels"] == n >= 1
+    json.dumps(cfg, allow_nan=False)
+    assert _config(gpm.preview(store).read_text())["attrs"]["title"] == "My title"
+
+
+def test_blank_config_attrs_levels():
+    cfg = pv.blank_config()
+    assert cfg["attrs"] == {} and cfg["levels"] == 0
+    assert _config(pv.render_html(None))["levels"] == 0

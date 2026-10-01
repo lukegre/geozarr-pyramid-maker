@@ -12,6 +12,7 @@
     --radius: 8px;
     --sb-w: 320px;
     --scrub-h: 0px;
+    --top-h: 44px;
     --card: #ffffff;
     --card-line: rgba(0, 0, 0, .08);
     --sidebar: #f3f4f6;
@@ -36,7 +37,7 @@
       --shadow: 0 1px 3px rgba(0, 0, 0, .55);
     }
   }
-  body.collapsed { --sb-w: 44px; }
+  body.collapsed { --sb-w: 44px; --top-h: 0px; }
   body.has-scrub { --scrub-h: 76px; }
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
@@ -46,13 +47,13 @@
   button { cursor: pointer; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-  #map { position: absolute; top: 0; bottom: 0; right: 0; left: var(--sb-w); background: var(--map-bg); }
+  #map { position: absolute; top: var(--top-h); bottom: 0; right: 0; left: var(--sb-w); background: var(--map-bg); }
 
   /* sidebar */
-  #sidebar { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sb-w); z-index: 5;
+  #sidebar { position: absolute; top: var(--top-h); bottom: 0; left: 0; width: var(--sb-w); z-index: 5;
     display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;
     background: var(--sidebar); border-right: 1px solid var(--card-line); }
-  #sbtoggle { position: absolute; top: var(--sp); right: var(--sp); z-index: 2; width: 28px; height: 28px;
+  #sbtoggle { position: absolute; top: 4px; right: var(--sp); z-index: 2; width: 28px; height: 28px;
     display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent;
     color: var(--muted); }
   #sbtoggle:hover, .iconbtn:hover { background: var(--hover); color: var(--text); }
@@ -60,6 +61,7 @@
   body.collapsed #sbtoggle { right: 4px; }
   body.collapsed #sbtoggle svg { transform: rotate(180deg); }
   body.collapsed #sidebar > :not(#sbtoggle, #sbspine) { display: none; }
+  body.collapsed #topbar, body.collapsed #infopanel { display: none; }
   #sbspine { display: none; }
   body.collapsed #sbspine { display: block; position: absolute; top: 44px; bottom: 12px; left: 0; right: 0;
     padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
@@ -69,21 +71,17 @@
     max-height: 100%; overflow: hidden; text-overflow: ellipsis; }
   #sbspine b { font-weight: 600; }
   #sbspine i { font-style: normal; color: var(--muted); }
-  #sbhead { padding: 12px 44px 4px 16px; display: flex; align-items: flex-start; gap: var(--sp); }
-  #sbhead h1 { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600;
-    overflow-wrap: anywhere; }
-  #storepath { width: 100%; box-sizing: border-box; margin: -3px 0 0 -6px; padding: 2px 6px;
-    border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit;
+  #sidebar { padding-top: 36px; }
+  /* top bar: full window width, always visible while the sidebar is expanded */
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--top-h); z-index: 10;
+    box-sizing: border-box; padding: 0 var(--sp); display: flex; align-items: center; gap: var(--sp);
+    background: var(--sidebar); border-bottom: 1px solid var(--card-line); }
+  #storepath { flex: 1; min-width: 0; box-sizing: border-box; height: 30px; padding: 4px 10px;
+    border: 1px solid var(--card-line); border-radius: 6px; background: var(--card); color: inherit;
     font: inherit; text-overflow: ellipsis; }
-  #storepath:hover { border-color: var(--card-line); }
   #storepath:focus { border-color: #4a90e2; outline: none; }
-  /* expand to the full window width while focused (or busy submitting); the h1 keeps its height */
-  #sbhead h1 { min-height: 22.5px; }
-  #storepath:focus, #storepath.busy { position: fixed; z-index: 20; top: 9px; left: var(--sp); right: var(--sp);
-    width: auto; margin: 0; padding: 6px 10px; text-overflow: clip; background: var(--sidebar);
-    box-shadow: var(--shadow); }
   #storepath.busy { opacity: .6; }
-  #storeerr { margin: 6px 16px 4px; padding: 8px 10px; border-radius: 6px; font-size: 12px;
+  #storeerr { margin: 0 16px 4px; padding: 8px 10px; border-radius: 6px; font-size: 12px;
     line-height: 1.4; border: 1px solid #d1242f; background: rgba(209, 36, 47, .1); overflow-wrap: anywhere; }
   #storeerr .msg { font-weight: 600; color: #d1242f; }
   #storeerr .hint { margin-top: 4px; }
@@ -91,11 +89,20 @@
   .iconbtn { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
     border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
   .iconbtn svg { width: 16px; height: 16px; }
-  #settingspanel { margin: 4px var(--sp) 0; padding: var(--sp) 12px; border-radius: var(--radius);
-    background: var(--card); box-shadow: var(--shadow); font-size: 12px; color: var(--muted); }
-  #settingspanel b { color: var(--text); font-weight: 600; }
-  #settingspanel div + div { margin-top: 2px; }
-  #s3row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+  #infobtn[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+  #infopanel { position: fixed; z-index: 12; top: calc(var(--top-h) + 4px); right: var(--sp);
+    width: min(520px, calc(100vw - 2 * var(--sp))); max-height: calc(100vh - var(--top-h) - 16px);
+    overflow: auto; box-sizing: border-box; padding: var(--sp) 12px 12px; border-radius: var(--radius);
+    background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); font-size: 12px; }
+  #infopanel h2 { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; }
+  #infopanel table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  #infopanel th, #infopanel td { padding: 3px 6px; text-align: left; vertical-align: top;
+    border-top: 1px solid var(--card-line); overflow-wrap: anywhere; }
+  #infopanel th { width: 32%; font-weight: 600; color: var(--muted); }
+  #infopanel td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  #s3row { display: flex; flex-direction: column; gap: 3px; margin: 0 16px 8px; font-size: 12px; }
+  #s3row label { font-weight: 600; color: var(--muted); }
   #s3row[hidden] { display: none; }
   #endpoint { padding: 3px 6px; border: 1px solid var(--card-line); border-radius: 4px;
     background: transparent; color: var(--text); font: inherit; }
@@ -108,6 +115,7 @@
   .card .top { display: flex; align-items: flex-start; gap: var(--sp); }
   .card .name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
   .card .meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
+  #selhint { padding: 0 var(--sp); margin-top: var(--sp); font-size: 11px; color: var(--muted); }
   .card .gear { display: none; }
   .card.active .gear { display: grid; }
   .card .gear[aria-expanded="true"] { background: var(--hover); color: var(--text); }
@@ -181,7 +189,7 @@
   #dimstack input[type=range] { writing-mode: vertical-lr; width: 16px; height: 96px; margin: 0; }
 
   /* map chrome */
-  .ol-zoom { top: var(--sp); left: auto; right: var(--sp); padding: 2px; border-radius: var(--radius);
+  .ol-zoom { top: calc(var(--top-h) + var(--sp)); left: auto; right: var(--sp); padding: 2px; border-radius: var(--radius);
     background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); }
   .ol-zoom button { width: 28px; height: 28px; margin: 0; border-radius: 6px; background: transparent;
     color: var(--text); font: 600 16px/1 system-ui, sans-serif; }
@@ -202,32 +210,31 @@
 </head>
 <body>
 <div id="map"></div>
+<header id="topbar">
+  <input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
+    aria-label="Store path or URL (press Enter to open)"
+    title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open.">
+  <button id="infobtn" class="iconbtn" type="button" aria-label="Dataset information" aria-expanded="false">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none"
+      stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>
+  </button>
+</header>
+<div id="infopanel" hidden></div>
 <aside id="sidebar">
   <button id="sbtoggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
   <button id="sbspine" type="button" aria-label="Expand sidebar"><span></span></button>
-  <div id="sbhead">
-    <h1><input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
-      aria-label="Store path or URL (press Enter to open)"
-      title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open."></h1>
-    <button id="settingsbtn" class="iconbtn" type="button" aria-label="Settings" aria-expanded="false">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" fill="none"
-        stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
-        fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-    </button>
-  </div>
   <div id="storeerr" role="alert" hidden></div>
-  <div id="settingspanel" hidden>
-    <div id="s3row" hidden>
-      <b><label for="endpoint">S3 endpoint URL</label></b>
-      <input id="endpoint" type="text" spellcheck="false" autocomplete="off"
-        placeholder="https://os.zhdk.cloud.switch.ch"
-        title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
-    </div>
-    <div id="inforows"></div>
+  <div id="s3row" hidden>
+    <label for="endpoint">S3 endpoint URL</label>
+    <input id="endpoint" type="text" spellcheck="false" autocomplete="off"
+      placeholder="https://os.zhdk.cloud.switch.ch"
+      title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
   </div>
+  <div id="selhint" hidden>Click cards to show several variables at once; the last one selected is drawn on top.</div>
   <div id="cards"></div>
   <div id="sbfoot">
     <label for="basemap">Basemap</label>
@@ -326,7 +333,7 @@ const wantedEndpoint = params.get('endpoint') || '';
 if (wanted === '' && cfg.variables && cfg.variables.length) {
   // `?store=` (empty): the blank viewer, even on a page generated for one store.
   cfg = {...cfg, title: '', source: '', store_url: '', variables: [], dims: {}, global: true,
-    basemap_default: true, bbox: [-180, -90, 180, 90],
+    basemap_default: true, bbox: [-180, -90, 180, 90], attrs: {}, levels: 0,
     crs: {code: 'EPSG:4326', name: 'EPSG:4326', proj4: null, projection: null}};
 } else if (wanted && (wanted !== cfg.source || wantedEndpoint !== (cfg.endpoint || ''))) {
   try { cfg = await openStore(wanted, wantedEndpoint); } catch (e) { startupError = e; }
@@ -461,13 +468,23 @@ function colorExpr(v) {
   return expr;
 }
 
-const state = {active: blank ? null : cfg.variables[0].name, dims: {}, opacity: 1, layer: null, source: null, layers: [], sources: [],
-  map: null, scrub: null, timer: null, optionsOpen: false};
-const cur = () => cfg.variables.find((v) => v.name === state.active);
+// selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources}.
+const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, opacity: {}, vlayers: new window.Map(),
+  map: null, scrub: null, scrubKey: null, timer: null, open: new Set()};
+const varOf = (name) => cfg.variables.find((v) => v.name === name);
+const selVars = () => state.selected.map(varOf);
+const opacityOf = (name) => (state.opacity[name] === undefined ? 1 : state.opacity[name]);
+// Union of the extra dims of the selected variables: selection order, then each variable's dim order.
+const unionDims = () => {
+  const out = [];
+  for (const v of selVars()) for (const d of v.dims) if (!out.includes(d)) out.push(d);
+  return out;
+};
 
 // ------------------------------------------------------------------ shareable URL
-// The URL mirrors the view: store, var, one parameter per dim of the active variable (ISO date
-// for time-like dims, else index), cmap, rev, vmin, vmax, opacity, lon and the map view (x, y, z).
+// The URL mirrors the view: store, var (comma-separated), one parameter per dim of the selected
+// variables (ISO date for time-like dims, else index), cmap, rev, vmin, vmax, opacity (suffixed
+// `.<var>` with several variables), lon and the map view (x, y, z).
 // URL values win over remembered (localStorage) ones, so a shared link reproduces the view.
 const dimToParam = (d, i) => {
   const iso = cfg.dims[d].iso;
@@ -482,27 +499,50 @@ function dimFromParam(d, raw) {
   const i = Number(raw);
   return Number.isInteger(i) && i >= 0 && i < size ? i : null;
 }
+// Style/opacity parameters: plain names for one selected variable, `<param>.<var>` for several.
+// On load a plain parameter applies to the first selected variable.
+function styleParams(vars) {
+  const multi = vars.length > 1, out = [];
+  for (const v of vars) {
+    const key = (k) => (multi ? `${k}.${v.name}` : k);
+    if (!v.categorical) {
+      const st = styleOf(v);
+      out.push([key('cmap'), st.cmap]);
+      if (st.reversed) out.push([key('rev'), '1']);
+      out.push([key('vmin'), String(+Number(st.vmin).toPrecision(6))]);
+      out.push([key('vmax'), String(+Number(st.vmax).toPrecision(6))]);
+    }
+    if (opacityOf(v.name) !== 1) out.push([key('opacity'), String(opacityOf(v.name))]);
+  }
+  return out;
+}
 (function applyUrlState() {
   if (blank) return;
-  const v0 = params.get('var');
-  if (v0 && cfg.variables.some((v) => v.name === v0)) state.active = v0;
+  const names = [];
+  for (const n of (params.get('var') || '').split(',')) if (varOf(n) && !names.includes(n)) names.push(n);
+  if (names.length) state.selected = names;
   for (const d of Object.keys(cfg.dims)) {
     const raw = params.get(d);
     if (raw === null) continue;
     const i = dimFromParam(d, raw);
     if (i !== null) state.dims[d] = i;
   }
-  const op = Number(params.get('opacity'));
-  if (params.has('opacity') && op >= 0 && op <= 1) state.opacity = op;
-  const v = cur();
-  const st = {...styleOf(v)};
-  const cm = params.get('cmap');
-  if (cm && cmaps[cm]) st.cmap = cm;
-  if (params.has('rev')) st.reversed = params.get('rev') === '1';
-  const lo = Number(params.get('vmin')), hi = Number(params.get('vmax'));
-  if (params.has('vmin') && Number.isFinite(lo)) st.vmin = lo;
-  if (params.has('vmax') && Number.isFinite(hi)) st.vmax = hi;
-  if (st.vmin < st.vmax) styles[v.name] = st;
+  state.selected.forEach((name, idx) => {
+    const v = varOf(name);
+    const get = (k) => (params.has(`${k}.${name}`) ? params.get(`${k}.${name}`) : (idx === 0 && params.has(k) ? params.get(k) : null));
+    const op = get('opacity');
+    if (op !== null && Number(op) >= 0 && Number(op) <= 1) state.opacity[name] = Number(op);
+    if (v.categorical) return;
+    const st = {...styleOf(v)};
+    const cm = get('cmap');
+    if (cm && cmaps[cm]) st.cmap = cm;
+    const rv = get('rev');
+    if (rv !== null) st.reversed = rv === '1';
+    const lo = get('vmin'), hi = get('vmax');
+    if (lo !== null && lo !== '' && Number.isFinite(Number(lo))) st.vmin = Number(lo);
+    if (hi !== null && hi !== '' && Number.isFinite(Number(hi))) st.vmax = Number(hi);
+    if (st.vmin < st.vmax) styles[name] = st;
+  });
 })();
 
 let urlTimer = null;
@@ -512,17 +552,12 @@ function syncUrl() {
     const q = new URLSearchParams();
     if (blank) q.set('store', '');
     else {
-      const v = cur();
-      const st = styleOf(v);
+      const vars = selVars();
       q.set('store', cfg.source);
       if (cfg.endpoint && /^s3:\/\//i.test(cfg.source)) q.set('endpoint', cfg.endpoint);
-      q.set('var', v.name);
-      for (const d of v.dims) q.set(d, dimToParam(d, state.dims[d] || 0));
-      q.set('cmap', st.cmap);
-      if (st.reversed) q.set('rev', '1');
-      q.set('vmin', String(+Number(st.vmin).toPrecision(6)));
-      q.set('vmax', String(+Number(st.vmax).toPrecision(6)));
-      if (state.opacity !== 1) q.set('opacity', String(state.opacity));
+      q.set('var', state.selected.join(','));
+      for (const d of unionDims()) q.set(d, dimToParam(d, state.dims[d] || 0));
+      for (const [k, val] of styleParams(vars)) q.set(k, val);
     }
     if (cfg.global) q.set('lon', String(state.centerLon));
     const view = state.map && state.map.getView();
@@ -531,7 +566,7 @@ function syncUrl() {
       q.set('x', c[0].toPrecision(6)); q.set('y', c[1].toPrecision(6));
       q.set('z', view.getZoom().toFixed(2));
     }
-    history.replaceState(null, '', `${location.pathname}?${q.toString().replace(/%2F/g, '/').replace(/%3A/g, ':')}`);
+    history.replaceState(null, '', `${location.pathname}?${q.toString().replace(/%2F/g, '/').replace(/%3A/g, ':').replace(/%2C/g, ',')}`);
   }, 150);
 }
 const unitsOf = (v) => v.units_display ?? v.units ?? '';
@@ -627,7 +662,7 @@ function buildCards() {
     card.append(legend);
     const opts = h('div', 'opts');
     const slider = h('input');
-    slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = state.opacity;
+    slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = opacityOf(v.name);
     slider.setAttribute('aria-label', 'Opacity');
     const orow = h('div', 'row');
     const olab = h('label', '', 'Opacity');
@@ -637,25 +672,26 @@ function buildCards() {
     if (!v.categorical) entry.sync = buildStyleControls(v, opts, entry);
     opts.addEventListener('click', (e) => e.stopPropagation());
     card.append(opts);
-    card.addEventListener('click', () => setActive(v.name));
+    card.addEventListener('click', () => toggleVar(v.name));
     card.addEventListener('keydown', (e) => {
-      if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setActive(v.name); }
+      if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleVar(v.name); }
     });
     gear.addEventListener('click', (e) => {
       e.stopPropagation();
-      state.optionsOpen = !state.optionsOpen;
+      if (state.open.has(v.name)) state.open.delete(v.name); else state.open.add(v.name);
       refreshCards();
     });
     slider.addEventListener('click', (e) => e.stopPropagation());
     slider.addEventListener('input', () => {
-      state.opacity = +slider.value;
-      for (const l of state.layers) l.setOpacity(state.opacity);
+      state.opacity[v.name] = +slider.value;
+      const vl = state.vlayers.get(v.name);
+      if (vl) for (const l of vl.layers) l.setOpacity(state.opacity[v.name]);
       syncUrl();
-      for (const c of cards.values()) c.slider.value = slider.value;
     });
     cards.set(v.name, entry);
     box.append(card);
   }
+  $('selhint').hidden = cfg.variables.length < 2;
 }
 
 function buildStyleControls(v, opts, entry) {
@@ -712,10 +748,8 @@ function buildStyleControls(v, opts, entry) {
     sync();
     if (clear) store.remove(styleKey(v)); else store.set(styleKey(v), JSON.stringify(styleOf(v)));
     syncUrl();
-    if (v.name === state.active && state.layer) {
-      for (const l of state.layers) if (typeof l.setStyle === 'function') l.setStyle({color: colorExpr(v)});
-      else replaceLayer();
-    }
+    const vl = state.vlayers.get(v.name);
+    if (vl) for (const l of vl.layers) l.setStyle({color: colorExpr(v)});
   };
   const setRange = () => {
     const a = parseFloat(minIn.value), b = parseFloat(maxIn.value);
@@ -746,26 +780,46 @@ function buildStyleControls(v, opts, entry) {
 
 function refreshCards() {
   for (const [name, c] of cards) {
-    const active = name === state.active;
+    const active = state.selected.includes(name);
+    const open = active && state.open.has(name);
     c.el.classList.toggle('active', active);
-    c.el.classList.toggle('open', active && state.optionsOpen);
+    c.el.classList.toggle('open', open);
     c.el.setAttribute('aria-pressed', String(active));
-    c.gear.setAttribute('aria-expanded', String(active && state.optionsOpen));
+    c.gear.setAttribute('aria-expanded', String(open));
   }
 }
 
 function buildInfo() {
-  const box = $('inforows');
-  const row = (k, v) => { const d = h('div'); d.append(h('b', '', `${k}: `), v); box.append(d); };
-  if (blank) row('Store', 'none loaded; type a path or URL above and press Enter');
-  row('CRS', cfg.crs.name);
-  if (cfg.relayed) box.append(h('div', '', 'Relayed through the preview server (the bucket does not allow direct browser access)'));
-  if (cfg.bbox) row('Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', '));
-  const panel = $('settingspanel');
-  $('settingsbtn').addEventListener('click', () => {
-    panel.hidden = !panel.hidden;
-    $('settingsbtn').setAttribute('aria-expanded', String(!panel.hidden));
-  });
+  const panel = $('infopanel');
+  const section = (title, rows) => {
+    panel.append(h('h2', '', title));
+    const tbl = h('table'), body = h('tbody');
+    for (const [k, v] of rows) {
+      const tr = h('tr');
+      tr.append(h('th', '', k), h('td', '', String(v)));
+      body.append(tr);
+    }
+    tbl.append(body); panel.append(tbl);
+  };
+  const rows = [];
+  if (blank) rows.push(['Store', 'none loaded; type a path or URL above and press Enter']);
+  else rows.push(['Store', cfg.source || cfg.title]);
+  rows.push(['CRS', cfg.crs.name]);
+  if (cfg.bbox) rows.push(['Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', ')]);
+  if (!blank) {
+    const vars = cfg.variables.map((v) => v.name);
+    rows.push([`Variables (${vars.length})`, vars.join(', ')]);
+    for (const [d, info] of Object.entries(cfg.dims || {})) rows.push([`Dimension ${d}`, `${info.size} steps`]);
+    if (cfg.levels) rows.push(['Levels', cfg.levels]);
+  }
+  if (cfg.relayed) rows.push(['Access', 'Relayed through the preview server (the bucket does not allow direct browser access)']);
+  section('Metadata', rows);
+  const attrs = Object.entries(cfg.attrs || {});
+  if (attrs.length) section('Global attributes', attrs);
+  const btn = $('infobtn');
+  const setOpen = (open) => { panel.hidden = !open; btn.setAttribute('aria-expanded', String(open)); };
+  btn.addEventListener('click', () => setOpen(panel.hidden));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) setOpen(false); });
 }
 
 function initSidebar() {
@@ -841,25 +895,30 @@ function stopPlay() {
 function setDim(name, i) {
   state.dims[name] = i;
   syncUrl();
-  for (const src of state.sources) src.updateDimensions({[name]: i});
+  for (const [vn, vl] of state.vlayers) {
+    if (!varOf(vn).dims.includes(name)) continue;
+    for (const src of vl.sources) src.updateDimensions({[name]: i});
+  }
 }
 
-function buildScrubber(v) {
+function buildScrubber() {
   stopPlay();
   state.scrub = null;
+  const dimNames = unionDims();
+  state.scrubKey = dimNames.join('\u0000');
   const bar = $('scrubber'), stack = $('dimstack');
   bar.innerHTML = ''; stack.innerHTML = '';
-  bar.hidden = v.dims.length === 0;
-  stack.hidden = v.dims.length < 2;
-  document.body.classList.toggle('has-scrub', v.dims.length > 0);
-  if (!v.dims.length) return;
-  for (const name of v.dims) {
+  bar.hidden = dimNames.length === 0;
+  stack.hidden = dimNames.length < 2;
+  document.body.classList.toggle('has-scrub', dimNames.length > 0);
+  if (!dimNames.length) return;
+  for (const name of dimNames) {
     const size = cfg.dims[name].size;
     state.dims[name] = clamp(state.dims[name] || 0, 0, size - 1);
   }
 
   // main scrubber: first extra dim
-  const name = v.dims[0];
+  const name = dimNames[0];
   const d = cfg.dims[name];
   const n = d.size;
   const {pos, timed, lo, hi} = stepPositions(d);
@@ -953,7 +1012,7 @@ function buildScrubber(v) {
   layoutLabels();
 
   // further dims (e.g. depth): compact vertical sliders
-  for (const extra of v.dims.slice(1)) {
+  for (const extra of dimNames.slice(1)) {
     const ed = cfg.dims[extra];
     const item = h('div', 'dim');
     const val = h('span', 'val', String(dimLabel(ed, state.dims[extra])));
@@ -996,10 +1055,10 @@ function shiftGrid(grid, dx) {
   });
 }
 
-function makeLayers() {
+function makeLayers(v) {
   const offsets = cfg.global ? [0, -360, 360] : [0];
   const made = offsets.map((dx) => {
-    const m = makeLayer();
+    const m = makeLayer(v);
     if (dx) {
       const shift = () => {
         if (m.source.getState() !== 'ready' || m.source.gpmShifted) return;
@@ -1011,7 +1070,7 @@ function makeLayers() {
     }
     return m;
   });
-  return {source: made[0].source, layer: made[0].layer, sources: made.map((m) => m.source), layers: made.map((m) => m.layer)};
+  return {sources: made.map((m) => m.source), layers: made.map((m) => m.layer)};
 }
 
 function viewFor(opts) {
@@ -1025,8 +1084,7 @@ function viewFor(opts) {
   return pinned ? {...opts, center: [x, y], zoom: z} : opts;
 }
 
-function makeLayer() {
-  const v = cur();
+function makeLayer(v) {
   const dimensions = {};
   for (const n of v.dims) dimensions[n] = clamp(state.dims[n] || 0, 0, cfg.dims[n].size - 1);
   const opts = {url: storeUrl, bands: [v.name], transition: 0};
@@ -1035,7 +1093,7 @@ function makeLayer() {
   const source = new GeoZarr(opts);
   source.addEventListener?.('error', showError);
   return {source, layer: new WebGLTileLayer({
-    source, style: {color: colorExpr(v)}, opacity: state.opacity})};
+    source, style: {color: colorExpr(v)}, opacity: opacityOf(v.name)})};
 }
 
 function updateSpine() {
@@ -1043,29 +1101,37 @@ function updateSpine() {
     $('sbspine').firstElementChild.replaceChildren(h('i', null, 'no store loaded'));
     return;
   }
-  const v = cur();
+  const names = selVars().map((v) => v.display_name || v.name).join(', ');
   const span = $('sbspine').firstElementChild;
-  span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '),
-    h('i', null, v.display_name || v.name));
-  $('sbspine').title = `${cfg.source || cfg.title} · ${v.display_name || v.name}`;
+  span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '), h('i', null, names));
+  $('sbspine').title = `${cfg.source || cfg.title} · ${names}`;
 }
 
-function setActive(name) {
-  if (name === state.active) return;
-  state.active = name;
+// Add or remove one variable's layer group; other variables' layers are left untouched.
+function addVariable(name) {
+  const vl = makeLayers(varOf(name));
+  state.vlayers.set(name, vl);
+  for (const l of vl.layers) state.map.getLayers().push(l);  // above the existing data layers
+}
+
+function removeVariable(name) {
+  const vl = state.vlayers.get(name);
+  if (!vl) return;
+  for (const l of vl.layers) { state.map.getLayers().remove(l); l.dispose?.(); }
+  state.vlayers.delete(name);
+}
+
+function toggleVar(name) {
+  const i = state.selected.indexOf(name);
+  if (i >= 0 && state.selected.length === 1) return;  // keep at least one selected
+  stopPlay();
+  if (i >= 0) { state.selected.splice(i, 1); removeVariable(name); }
+  else { state.selected.push(name); addVariable(name); }
   syncUrl();
   updateSpine();
   refreshCards();
-  buildScrubber(cur());
-  replaceLayer();
+  if (state.scrubKey !== unionDims().join('\u0000')) buildScrubber();
   $('readout').hidden = true;
-}
-
-function replaceLayer() {
-  const next = makeLayers();
-  for (const l of state.layers) { state.map.getLayers().remove(l); l.dispose?.(); }
-  for (const l of next.layers) state.map.getLayers().push(l);
-  Object.assign(state, next);
 }
 
 function initCenterLon() {
@@ -1111,18 +1177,25 @@ function initReadout(map) {
   const ro = $('readout');
   const hide = () => { ro.hidden = true; };
   map.on('pointermove', (e) => {
-    if (e.dragging || !state.layer) return hide();
-    let val = null;
-    try {
-      for (const l of state.layers) {
-        const data = l.getData(e.pixel);
-        if (data && data.length && Number.isFinite(data[0])) { val = data[0]; break; }
-      }
-    } catch (_) { /* layer not rendered yet */ }
-    if (val === null || !Number.isFinite(val)) return hide();
-    const v = cur();
-    const u = unitsOf(v);
-    ro.textContent = v.categorical ? String(val) : `${+Number(val).toPrecision(4)}${u ? ` ${u}` : ''}`;
+    if (e.dragging || !state.vlayers.size) return hide();
+    const lines = [];
+    for (const name of [...state.selected].reverse()) {  // top-most first
+      const vl = state.vlayers.get(name);
+      if (!vl) continue;
+      let val = null;
+      try {
+        for (const l of vl.layers) {
+          const data = l.getData(e.pixel);
+          if (data && data.length && Number.isFinite(data[0])) { val = data[0]; break; }
+        }
+      } catch (_) { /* layer not rendered yet */ }
+      if (val === null || !Number.isFinite(val)) continue;
+      const v = varOf(name);
+      const u = unitsOf(v);
+      lines.push(`${v.display_name || v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
+    }
+    if (!lines.length) return hide();
+    ro.replaceChildren(...lines.map((t) => h('div', '', t)));
     ro.hidden = false;
     const o = e.originalEvent;
     const w = ro.offsetWidth, hgt = ro.offsetHeight;
@@ -1153,14 +1226,15 @@ function init() {
   }
   buildCards();
   refreshCards();
-  buildScrubber(cur());
-  Object.assign(state, makeLayers());
+  buildScrubber();
+  for (const name of state.selected) state.vlayers.set(name, makeLayers(varOf(name)));
+  const dataLayers = state.selected.flatMap((n) => state.vlayers.get(n).layers);
   // Pass a promise: Map's `view` option accepts Promise<ViewOptions> and resolves it. The resolved
   // options are adjusted for the centre longitude.
-  const view = getView(state.source, withLowerResolutions(1), withHigherResolutions(2),
+  const view = getView(state.vlayers.get(state.selected[0]).sources[0], withLowerResolutions(1), withHigherResolutions(2),
     withExtentCenter(), withZoom(2)).then(viewFor);
   view.catch(showError);
-  state.map = new Map({target: 'map', layers: [...basemaps, ...state.layers], view});
+  state.map = new Map({target: 'map', layers: [...basemaps, ...dataLayers], view});
   initReadout(state.map);
   state.map.on('moveend', syncUrl);
   syncUrl();
