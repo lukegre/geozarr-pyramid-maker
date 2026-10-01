@@ -95,7 +95,8 @@ def _s3_endpoint_options(endpoint: str) -> dict[str, Any]:
         return opts
     opts = {"endpoint": endpoint}
     if endpoint.lower().startswith("http://"):
-        opts["allow_http"] = True
+        # allow_http is an obstore client option, not an aws_-prefixed S3 config key
+        opts["client_options"] = {"allow_http": True}
     if anonymous:
         opts["skip_signature"] = True
     return opts
