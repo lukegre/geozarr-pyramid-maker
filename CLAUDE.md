@@ -50,3 +50,12 @@ and the target tests, plus the rule: TDD (red → green), and run `.venv/bin/pyt
 - Metadata is built with `geozarr-toolkit` helpers, not handwritten dicts.
 - Tests marked `slow`/`network` are excluded by default (`addopts -m "not slow and not network"`); run them with `uv run pytest -m "slow or network"`.
 - ISO-8601 dates; metric units.
+
+## Preview test store
+- Default store for checking the viewer: `s3://spi-greenfjord-public/test/mur_sst_subset.zarr` on endpoint
+  `https://os.zhdk.cloud.switch.ch` (public, no credentials needed).
+- Start `viewer` from `.claude/launch.json` (blank-viewer server), then navigate to
+  `http://localhost:8765/?store=s3://spi-greenfjord-public/test/mur_sst_subset.zarr&endpoint=https://os.zhdk.cloud.switch.ch`.
+  The bucket has no CORS rules, so tiles go through the server's `/remote/` relay (D-31). A baked page
+  (`preview STORE --serve`) has no relay and stays blank.
+- Python checks of this store (obstore) need `dangerouslyDisableSandbox`; obstore's client ignores the sandbox proxy.
