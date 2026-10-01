@@ -12,6 +12,7 @@
     --radius: 8px;
     --sb-w: 320px;
     --scrub-h: 0px;
+    --top-h: 44px;
     --card: #ffffff;
     --card-line: rgba(0, 0, 0, .08);
     --sidebar: #f3f4f6;
@@ -36,7 +37,7 @@
       --shadow: 0 1px 3px rgba(0, 0, 0, .55);
     }
   }
-  body.collapsed { --sb-w: 44px; }
+  body.collapsed { --sb-w: 44px; --top-h: 0px; }
   body.has-scrub { --scrub-h: 76px; }
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
@@ -46,13 +47,13 @@
   button { cursor: pointer; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-  #map { position: absolute; top: 0; bottom: 0; right: 0; left: var(--sb-w); background: var(--map-bg); }
+  #map { position: absolute; top: var(--top-h); bottom: 0; right: 0; left: var(--sb-w); background: var(--map-bg); }
 
   /* sidebar */
-  #sidebar { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sb-w); z-index: 5;
+  #sidebar { position: absolute; top: var(--top-h); bottom: 0; left: 0; width: var(--sb-w); z-index: 5;
     display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;
     background: var(--sidebar); border-right: 1px solid var(--card-line); }
-  #sbtoggle { position: absolute; top: var(--sp); right: var(--sp); z-index: 2; width: 28px; height: 28px;
+  #sbtoggle { position: absolute; top: 4px; right: var(--sp); z-index: 2; width: 28px; height: 28px;
     display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent;
     color: var(--muted); }
   #sbtoggle:hover, .iconbtn:hover { background: var(--hover); color: var(--text); }
@@ -60,6 +61,7 @@
   body.collapsed #sbtoggle { right: 4px; }
   body.collapsed #sbtoggle svg { transform: rotate(180deg); }
   body.collapsed #sidebar > :not(#sbtoggle, #sbspine) { display: none; }
+  body.collapsed #topbar, body.collapsed #infopanel { display: none; }
   #sbspine { display: none; }
   body.collapsed #sbspine { display: block; position: absolute; top: 44px; bottom: 12px; left: 0; right: 0;
     padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
@@ -69,21 +71,17 @@
     max-height: 100%; overflow: hidden; text-overflow: ellipsis; }
   #sbspine b { font-weight: 600; }
   #sbspine i { font-style: normal; color: var(--muted); }
-  #sbhead { padding: 12px 44px 4px 16px; display: flex; align-items: flex-start; gap: var(--sp); }
-  #sbhead h1 { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600;
-    overflow-wrap: anywhere; }
-  #storepath { width: 100%; box-sizing: border-box; margin: -3px 0 0 -6px; padding: 2px 6px;
-    border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit;
+  #sidebar { padding-top: 36px; }
+  /* top bar: full window width, always visible while the sidebar is expanded */
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--top-h); z-index: 10;
+    box-sizing: border-box; padding: 0 var(--sp); display: flex; align-items: center; gap: var(--sp);
+    background: var(--sidebar); border-bottom: 1px solid var(--card-line); }
+  #storepath { flex: 1; min-width: 0; box-sizing: border-box; height: 30px; padding: 4px 10px;
+    border: 1px solid var(--card-line); border-radius: 6px; background: var(--card); color: inherit;
     font: inherit; text-overflow: ellipsis; }
-  #storepath:hover { border-color: var(--card-line); }
   #storepath:focus { border-color: #4a90e2; outline: none; }
-  /* expand to the full window width while focused (or busy submitting); the h1 keeps its height */
-  #sbhead h1 { min-height: 22.5px; }
-  #storepath:focus, #storepath.busy { position: fixed; z-index: 20; top: 9px; left: var(--sp); right: var(--sp);
-    width: auto; margin: 0; padding: 6px 10px; text-overflow: clip; background: var(--sidebar);
-    box-shadow: var(--shadow); }
   #storepath.busy { opacity: .6; }
-  #storeerr { margin: 6px 16px 4px; padding: 8px 10px; border-radius: 6px; font-size: 12px;
+  #storeerr { margin: 0 16px 4px; padding: 8px 10px; border-radius: 6px; font-size: 12px;
     line-height: 1.4; border: 1px solid #d1242f; background: rgba(209, 36, 47, .1); overflow-wrap: anywhere; }
   #storeerr .msg { font-weight: 600; color: #d1242f; }
   #storeerr .hint { margin-top: 4px; }
@@ -91,11 +89,20 @@
   .iconbtn { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
     border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
   .iconbtn svg { width: 16px; height: 16px; }
-  #settingspanel { margin: 4px var(--sp) 0; padding: var(--sp) 12px; border-radius: var(--radius);
-    background: var(--card); box-shadow: var(--shadow); font-size: 12px; color: var(--muted); }
-  #settingspanel b { color: var(--text); font-weight: 600; }
-  #settingspanel div + div { margin-top: 2px; }
-  #s3row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+  #infobtn[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+  #infopanel { position: fixed; z-index: 12; top: calc(var(--top-h) + 4px); right: var(--sp);
+    width: min(520px, calc(100vw - 2 * var(--sp))); max-height: calc(100vh - var(--top-h) - 16px);
+    overflow: auto; box-sizing: border-box; padding: var(--sp) 12px 12px; border-radius: var(--radius);
+    background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); font-size: 12px; }
+  #infopanel h2 { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; }
+  #infopanel table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  #infopanel th, #infopanel td { padding: 3px 6px; text-align: left; vertical-align: top;
+    border-top: 1px solid var(--card-line); overflow-wrap: anywhere; }
+  #infopanel th { width: 32%; font-weight: 600; color: var(--muted); }
+  #infopanel td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  #s3row { display: flex; flex-direction: column; gap: 3px; margin: 0 16px 8px; font-size: 12px; }
+  #s3row label { font-weight: 600; color: var(--muted); }
   #s3row[hidden] { display: none; }
   #endpoint { padding: 3px 6px; border: 1px solid var(--card-line); border-radius: 4px;
     background: transparent; color: var(--text); font: inherit; }
@@ -181,7 +188,7 @@
   #dimstack input[type=range] { writing-mode: vertical-lr; width: 16px; height: 96px; margin: 0; }
 
   /* map chrome */
-  .ol-zoom { top: var(--sp); left: auto; right: var(--sp); padding: 2px; border-radius: var(--radius);
+  .ol-zoom { top: calc(var(--top-h) + var(--sp)); left: auto; right: var(--sp); padding: 2px; border-radius: var(--radius);
     background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); }
   .ol-zoom button { width: 28px; height: 28px; margin: 0; border-radius: 6px; background: transparent;
     color: var(--text); font: 600 16px/1 system-ui, sans-serif; }
@@ -202,31 +209,29 @@
 </head>
 <body>
 <div id="map"></div>
+<header id="topbar">
+  <input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
+    aria-label="Store path or URL (press Enter to open)"
+    title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open.">
+  <button id="infobtn" class="iconbtn" type="button" aria-label="Dataset information" aria-expanded="false">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none"
+      stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>
+  </button>
+</header>
+<div id="infopanel" hidden></div>
 <aside id="sidebar">
   <button id="sbtoggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
   <button id="sbspine" type="button" aria-label="Expand sidebar"><span></span></button>
-  <div id="sbhead">
-    <h1><input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
-      aria-label="Store path or URL (press Enter to open)"
-      title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open."></h1>
-    <button id="settingsbtn" class="iconbtn" type="button" aria-label="Settings" aria-expanded="false">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" fill="none"
-        stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
-        fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-    </button>
-  </div>
   <div id="storeerr" role="alert" hidden></div>
-  <div id="settingspanel" hidden>
-    <div id="s3row" hidden>
-      <b><label for="endpoint">S3 endpoint URL</label></b>
-      <input id="endpoint" type="text" spellcheck="false" autocomplete="off"
-        placeholder="https://os.zhdk.cloud.switch.ch"
-        title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
-    </div>
-    <div id="inforows"></div>
+  <div id="s3row" hidden>
+    <label for="endpoint">S3 endpoint URL</label>
+    <input id="endpoint" type="text" spellcheck="false" autocomplete="off"
+      placeholder="https://os.zhdk.cloud.switch.ch"
+      title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
   </div>
   <div id="cards"></div>
   <div id="sbfoot">
@@ -326,7 +331,7 @@ const wantedEndpoint = params.get('endpoint') || '';
 if (wanted === '' && cfg.variables && cfg.variables.length) {
   // `?store=` (empty): the blank viewer, even on a page generated for one store.
   cfg = {...cfg, title: '', source: '', store_url: '', variables: [], dims: {}, global: true,
-    basemap_default: true, bbox: [-180, -90, 180, 90],
+    basemap_default: true, bbox: [-180, -90, 180, 90], attrs: {}, levels: 0,
     crs: {code: 'EPSG:4326', name: 'EPSG:4326', proj4: null, projection: null}};
 } else if (wanted && (wanted !== cfg.source || wantedEndpoint !== (cfg.endpoint || ''))) {
   try { cfg = await openStore(wanted, wantedEndpoint); } catch (e) { startupError = e; }
@@ -755,17 +760,36 @@ function refreshCards() {
 }
 
 function buildInfo() {
-  const box = $('inforows');
-  const row = (k, v) => { const d = h('div'); d.append(h('b', '', `${k}: `), v); box.append(d); };
-  if (blank) row('Store', 'none loaded; type a path or URL above and press Enter');
-  row('CRS', cfg.crs.name);
-  if (cfg.relayed) box.append(h('div', '', 'Relayed through the preview server (the bucket does not allow direct browser access)'));
-  if (cfg.bbox) row('Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', '));
-  const panel = $('settingspanel');
-  $('settingsbtn').addEventListener('click', () => {
-    panel.hidden = !panel.hidden;
-    $('settingsbtn').setAttribute('aria-expanded', String(!panel.hidden));
-  });
+  const panel = $('infopanel');
+  const section = (title, rows) => {
+    panel.append(h('h2', '', title));
+    const tbl = h('table'), body = h('tbody');
+    for (const [k, v] of rows) {
+      const tr = h('tr');
+      tr.append(h('th', '', k), h('td', '', String(v)));
+      body.append(tr);
+    }
+    tbl.append(body); panel.append(tbl);
+  };
+  const rows = [];
+  if (blank) rows.push(['Store', 'none loaded; type a path or URL above and press Enter']);
+  else rows.push(['Store', cfg.source || cfg.title]);
+  rows.push(['CRS', cfg.crs.name]);
+  if (cfg.bbox) rows.push(['Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', ')]);
+  if (!blank) {
+    const vars = cfg.variables.map((v) => v.name);
+    rows.push([`Variables (${vars.length})`, vars.join(', ')]);
+    for (const [d, info] of Object.entries(cfg.dims || {})) rows.push([`Dimension ${d}`, `${info.size} steps`]);
+    if (cfg.levels) rows.push(['Levels', cfg.levels]);
+  }
+  if (cfg.relayed) rows.push(['Access', 'Relayed through the preview server (the bucket does not allow direct browser access)']);
+  section('Metadata', rows);
+  const attrs = Object.entries(cfg.attrs || {});
+  if (attrs.length) section('Global attributes', attrs);
+  const btn = $('infobtn');
+  const setOpen = (open) => { panel.hidden = !open; btn.setAttribute('aria-expanded', String(open)); };
+  btn.addEventListener('click', () => setOpen(panel.hidden));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) setOpen(false); });
 }
 
 function initSidebar() {

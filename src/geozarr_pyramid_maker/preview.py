@@ -364,6 +364,48 @@ def _coord_values(group: zarr.Group, name: str) -> np.ndarray | None:
     return xr.conventions.decode_cf_variable(name, var).values
 
 
+_ATTR_MAX = 2000
+_MACHINERY_ATTRS = ("multiscales", "zarr_conventions", VARIABLES_ATTR)
+
+
+def _attr_value(value: Any) -> str | int | float:
+    """A JSON-safe display value: strings and finite numbers as-is, anything else a string."""
+    if isinstance(value, (bool, np.bool_)):
+        out: str | int | float = str(bool(value))
+    elif isinstance(value, (int, np.integer)):
+        out = int(value)
+    elif isinstance(value, (float, np.floating)):
+        out = float(value) if math.isfinite(value) else str(float(value))
+    elif isinstance(value, str):
+        out = value
+    elif isinstance(value, (list, tuple, np.ndarray)):
+        items = value.tolist() if isinstance(value, np.ndarray) else value
+        out = ", ".join(
+            x
+            if isinstance(x, str)
+            else json.dumps(x, default=str)
+            if isinstance(x, dict)
+            else str(x)
+            for x in items
+        )
+    elif isinstance(value, dict):
+        out = json.dumps(value, default=str)
+    else:
+        out = str(value)
+    if isinstance(out, str) and len(out) > _ATTR_MAX:
+        out = out[:_ATTR_MAX] + "…"
+    return out
+
+
+def _global_attrs(attrs: dict[str, Any]) -> dict[str, str | int | float]:
+    """Root attrs minus the pyramid/GeoZarr machinery, as JSON-safe display values."""
+    return {
+        str(k): _attr_value(v)
+        for k, v in attrs.items()
+        if k not in _MACHINERY_ATTRS and not str(k).startswith(("proj:", "spatial:"))
+    }
+
+
 def read_config(
     store: str | os.PathLike, storage_options: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -413,6 +455,8 @@ def read_config(
         "dims": dims,
         "crs": crs,
         "bbox": attrs.get("spatial:bbox"),
+        "attrs": _global_attrs(attrs),
+        "levels": len(layout),
         "global": _is_global(attrs),
         "ramp": RAMP,
         "colormaps": COLORMAPS,
@@ -660,6 +704,8 @@ def blank_config() -> dict[str, Any]:
         "dims": {},
         "crs": {"code": "EPSG:4326", "name": "EPSG:4326", "proj4": None, "projection": None},
         "bbox": [-180.0, -90.0, 180.0, 90.0],
+        "attrs": {},
+        "levels": 0,
         "global": True,
         "ramp": RAMP,
         "colormaps": COLORMAPS,
