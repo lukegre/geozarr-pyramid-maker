@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "viewer",
+      "runtimeExecutable": ".venv/bin/geozarr-pyramid",
+      "runtimeArgs": ["preview", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}
