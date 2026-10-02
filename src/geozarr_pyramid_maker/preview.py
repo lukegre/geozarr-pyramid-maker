@@ -716,16 +716,21 @@ def blank_config() -> dict[str, Any]:
 
 
 def render_html(config: dict[str, Any] | None = None) -> str:
-    """Fill the template; ``None`` gives the blank viewer."""
+    """Embed a store config in the standalone viewer; ``None`` gives the blank viewer."""
     if config is None:
         config = blank_config()
     payload = json.dumps(config, allow_nan=False).replace("</", "<\\/")
-    return (
-        template_text()
-        .replace("__TITLE__", html.escape(config["title"] or "GeoZarr viewer"))
-        .replace("__OL_VERSION__", OL_VERSION)
-        .replace("__PROJ4_VERSION__", PROJ4_VERSION)
-        .replace("__CONFIG_JSON__", payload)
+    page = re.sub(
+        r'(<script id="config" type="application/json">).*?(</script>)',
+        lambda match: match[1] + payload + match[2],
+        template_text(),
+        count=1,
+        flags=re.DOTALL,
+    )
+    title = html.escape(config["title"] or "GeoZarr viewer")
+    return page.replace(
+        "<title>GeoZarr viewer | GeoZarr preview</title>",
+        f"<title>{title} | GeoZarr preview</title>",
     )
 
 
@@ -1142,6 +1147,8 @@ def preview(
         out_path = Path(out) if out else store_path.parent / f"{name}.preview.html"
         config["store_url"] = _relative_url(store_path, out_path.parent)
         config["source"] = display_source(str(store))
+    if serve:
+        config["api_base"] = getattr(server, "base_path", "") + "/"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(render_html(config), encoding="utf-8")
     logger.info("Preview page written to {}", out_path)

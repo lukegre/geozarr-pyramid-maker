@@ -52,6 +52,17 @@ geozarr-pyramid preview out.zarr --serve --port 8000
 geozarr-pyramid preview --demo                                          # blank-viewer server opened on a public MUR SST demo store (needs network)
 ```
 
+The [standalone viewer](src/geozarr_pyramid_maker/templates/preview.html) can be copied
+unchanged to a static web host. It opens with Light, Dark and OSM basemaps; enter a GeoZarr
+store URL in the top bar, or open `preview.html?store=https://example.org/data.zarr`.
+Relative URLs such as `?store=./data.zarr` work too. Public S3 stores can use `s3://bucket/key`
+with the optional endpoint field. No Python API or build step is needed. The page loads
+its JavaScript dependencies and basemap tiles from the internet. Store hosting must support
+HTTP Range requests for sharded arrays and CORS when the store is on another origin.
+Stores need GeoZarr v3 metadata with consolidated array metadata or the variable-order
+attribute written by this package. For filesystem paths or buckets without CORS, use the
+Python preview server instead.
+
 Use `-v`/`-vv` for DEBUG/TRACE logs and `-q` for warnings only.
 
 ## Output layout
