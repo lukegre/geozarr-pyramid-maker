@@ -251,14 +251,45 @@ def preview(
             help="Custom S3 endpoint URL for an s3:// STORE (e.g. https://os.zhdk.cloud.switch.ch).",
         ),
     ] = None,
+    demo: Annotated[
+        bool,
+        typer.Option(
+            "--demo", help="Serve the viewer opened on the MUR SST demo store (needs network)."
+        ),
+    ] = False,
 ) -> None:
     """Write an OpenLayers preview page for STORE, optionally serving it.
 
     Without STORE, serve a blank viewer that can open any pyramid.
     """
+    from .preview import DEMO_ENDPOINT, DEMO_STORE, serve_viewer
     from .preview import preview as _preview
-    from .preview import serve_viewer
 
+    if demo:
+        clash = [
+            n
+            for n, v in (
+                ("STORE", store),
+                ("--endpoint", endpoint),
+                ("--out", out),
+                ("--serve", serve),
+            )
+            if v
+        ]
+        if clash:
+            typer.echo(f"Error: --demo cannot be combined with {', '.join(clash)}.", err=True)
+            raise typer.Exit(2)
+        with _clean_errors():
+            serve_viewer(
+                ".",
+                port=port,
+                host=host,
+                base_path=base_path,
+                open_browser=open_browser,
+                on_ready=lambda url: typer.echo(f"url: {url}"),
+                start=(DEMO_STORE, DEMO_ENDPOINT),
+            )
+        return
     if store is None:
         with _clean_errors():
             serve_viewer(

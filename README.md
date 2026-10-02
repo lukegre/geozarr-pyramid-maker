@@ -47,6 +47,7 @@ geozarr-pyramid convert input.nc out.zarr --var melt --crs EPSG:3031 --tile-size
 geozarr-pyramid convert dfco2.zarr out.zarr --resampling mean          # or --resampling melt=mean --resampling mask=mode
 geozarr-pyramid validate out.zarr
 geozarr-pyramid preview out.zarr --serve --port 8000
+geozarr-pyramid preview --demo                                          # blank-viewer server opened on a public MUR SST demo store (needs network)
 ```
 
 Use `-v`/`-vv` for DEBUG/TRACE logs and `-q` for warnings only.

@@ -265,11 +265,19 @@ def _raw(directory, request: bytes, server=None) -> tuple[int, dict, bytes]:
     try:
         a.sendall(request)
         a.shutdown(socket.SHUT_WR)
-        pv.RangeHandler(b, ("127.0.0.1", 0), server, directory=str(directory))
-        b.close()
+
+        def handle():
+            try:
+                pv.RangeHandler(b, ("127.0.0.1", 0), server, directory=str(directory))
+            finally:
+                b.close()
+
+        thread = threading.Thread(target=handle, daemon=True)
+        thread.start()
         raw = b""
         while chunk := a.recv(65536):
             raw += chunk
+        thread.join(timeout=5)
     finally:
         a.close()
     head, _, body = raw.partition(b"\r\n\r\n")
@@ -1222,3 +1230,54 @@ def test_blank_config_attrs_levels():
     cfg = pv.blank_config()
     assert cfg["attrs"] == {} and cfg["levels"] == 0
     assert _config(pv.render_html(None))["levels"] == 0
+
+
+# ------------------------------------------------------------- start store redirect (D-34)
+
+
+def _viewer_srv(start, base_path=""):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(base_path=base_path, mounts={}, blank_viewer=True, start=start)
+
+
+START = ("s3://bkt/a b.zarr", "https://e.org")
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_start_redirects_empty_query(tmp_path, method):
+    req = f"{method} / HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    code, headers, _ = _raw(tmp_path, req, _viewer_srv(START))
+    assert code == 302
+    assert headers["Location"] == "/?store=s3%3A%2F%2Fbkt%2Fa+b.zarr&endpoint=https%3A%2F%2Fe.org"
+
+
+def test_start_redirect_without_endpoint(tmp_path):
+    req = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"
+    code, headers, _ = _raw(tmp_path, req, _viewer_srv(("s3://b/a.zarr", None)))
+    assert code == 302 and headers["Location"] == "/?store=s3%3A%2F%2Fb%2Fa.zarr"
+
+
+def test_start_redirect_with_base_path(tmp_path):
+    req = b"GET /pre/ HTTP/1.1\r\nHost: x\r\n\r\n"
+    code, headers, _ = _raw(tmp_path, req, _viewer_srv(START, "/pre"))
+    assert code == 302
+    assert headers["Location"].startswith("/pre/?store=s3%3A%2F%2Fbkt")
+
+
+@pytest.mark.parametrize("query", ["?store=", "?store=x", "?var=a"])
+def test_start_not_redirected_with_query(tmp_path, query):
+    req = f"GET /{query} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    code, _, body = _raw(tmp_path, req, _viewer_srv(START))
+    assert code == 200 and b"<html" in body.lower()
+
+
+def test_no_start_no_redirect(tmp_path):
+    req = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"
+    code, _, _ = _raw(tmp_path, req, _viewer_srv(None))
+    assert code == 200
+
+
+def test_demo_constants():
+    assert pv.DEMO_STORE == "s3://spi-greenfjord-public/test/mur_sst_subset.zarr"
+    assert pv.DEMO_ENDPOINT == "https://os.zhdk.cloud.switch.ch"

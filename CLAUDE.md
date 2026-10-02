@@ -54,6 +54,7 @@ and the target tests, plus the rule: TDD (red → green), and run `.venv/bin/pyt
 ## Preview test store
 - Default store for checking the viewer: `s3://spi-greenfjord-public/test/mur_sst_subset.zarr` on endpoint
   `https://os.zhdk.cloud.switch.ch` (public, no credentials needed).
+- `geozarr-pyramid preview --demo` serves the viewer already opened on this store (D-34).
 - Start `viewer` from `.claude/launch.json` (blank-viewer server), then navigate to
   `http://localhost:8765/?store=s3://spi-greenfjord-public/test/mur_sst_subset.zarr&endpoint=https://os.zhdk.cloud.switch.ch`.
   The bucket has no CORS rules, so tiles go through the server's `/remote/` relay (D-31). A baked page
