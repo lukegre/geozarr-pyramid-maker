@@ -5,6 +5,8 @@ in the native CRS, with the modular GeoZarr conventions and CF `grid_mapping` me
 `ds.geozarr.to_pyramid("out.zarr")`. Everything is lazy with dask, so data larger than memory is fine. The result is
 ready for web viewers (OpenLayers, TiTiler, ...) and still opens with xarray, GDAL and QGIS.
 
+Credit for the original code and idea goes to the ESA Polar Hackathon team: https://esa-earthcode.github.io/polar_hackathon/geozarr-conversion/ 
+
 ## Install
 
 ```bash
