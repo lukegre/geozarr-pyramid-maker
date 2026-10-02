@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>__TITLE__ | GeoZarr preview</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/ol.css">
+<title>GeoZarr viewer | GeoZarr preview</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.10.0/ol.css">
 <style>
   :root {
     --sp: 8px;
@@ -211,7 +211,7 @@
 <body>
 <div id="map"></div>
 <header id="topbar">
-  <input id="storepath" type="text" spellcheck="false" autocomplete="off" value="__TITLE__"
+  <input id="storepath" type="text" spellcheck="false" autocomplete="off" value=""
     aria-label="Store path or URL (press Enter to open)"
     title="Local path, https:// or s3:// URL of a GeoZarr pyramid. Press Enter to open.">
   <button id="infobtn" class="iconbtn" type="button" aria-label="Dataset information" aria-expanded="false">
@@ -251,25 +251,24 @@
 <div id="dimstack" hidden></div>
 <div id="scrubber" hidden></div>
 <div id="readout" hidden></div>
-<script id="config" type="application/json">__CONFIG_JSON__</script>
+<script id="config" type="application/json">{"title": "", "source": "", "store_url": "", "ol_version": "10.10.0", "variables": [], "dims": {}, "crs": {"code": "EPSG:4326", "name": "EPSG:4326", "proj4": null, "projection": null}, "bbox": [-180.0, -90.0, 180.0, 90.0], "attrs": {}, "levels": 0, "global": true, "ramp": [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]], "colormaps": {"viridis": [[68, 1, 84], [72, 36, 117], [65, 68, 135], [53, 95, 141], [42, 120, 142], [33, 145, 140], [34, 168, 132], [68, 191, 112], [122, 209, 81], [189, 223, 38], [253, 231, 37]], "magma": [[0, 0, 4], [20, 14, 54], [59, 15, 112], [100, 26, 128], [140, 41, 129], [183, 55, 121], [222, 73, 104], [247, 112, 92], [254, 159, 109], [254, 207, 146], [252, 253, 191]], "inferno": [[0, 0, 4], [22, 11, 57], [66, 10, 104], [106, 23, 110], [147, 38, 103], [188, 55, 84], [221, 81, 58], [243, 120, 25], [252, 165, 10], [246, 215, 70], [252, 255, 164]], "cividis": [[0, 34, 78], [8, 51, 112], [53, 69, 108], [79, 87, 108], [102, 105, 112], [125, 124, 120], [148, 142, 119], [174, 163, 113], [200, 184, 102], [229, 207, 82], [254, 232, 56]], "turbo": [[48, 18, 59], [69, 89, 203], [62, 155, 254], [25, 213, 205], [70, 248, 132], [164, 252, 60], [225, 221, 55], [254, 164, 49], [240, 91, 18], [195, 37, 3], [122, 4, 3]], "RdBu_r": [[5, 48, 97], [32, 101, 171], [67, 147, 195], [144, 196, 221], [209, 229, 240], [247, 246, 246], [253, 219, 199], [243, 164, 129], [214, 96, 77], [177, 24, 43], [103, 0, 31]], "coolwarm": [[59, 76, 192], [89, 119, 227], [123, 159, 249], [158, 190, 255], [192, 212, 245], [221, 220, 220], [242, 203, 183], [247, 172, 142], [238, 132, 104], [214, 82, 68], [180, 4, 38]], "BrBG": [[84, 48, 5], [139, 80, 10], [191, 129, 45], [222, 193, 123], [246, 232, 195], [244, 245, 245], [199, 234, 229], [127, 204, 192], [53, 151, 143], [1, 101, 93], [0, 60, 48]], "PuOr": [[127, 59, 8], [178, 87, 6], [224, 130, 20], [252, 183, 97], [254, 224, 182], [246, 246, 247], [216, 218, 235], [177, 170, 209], [128, 115, 172], [83, 38, 135], [45, 0, 75]]}, "basemap_default": true}</script>
 <script type="module">
-import Map from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/Map.js/+esm';
-import WMTSTileGrid from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/tilegrid/WMTS.js/+esm';
+import Map from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/Map.js/+esm';
+import WMTSTileGrid from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/tilegrid/WMTS.js/+esm';
 import {getView, withExtentCenter, withHigherResolutions, withLowerResolutions, withZoom}
-  from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/View.js/+esm';
-import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/WebGLTile.js/+esm';
-import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/layer/Tile.js/+esm';
-import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/GeoZarr.js/+esm';
-import OSM from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/source/OSM.js/+esm';
-import {register} from 'https://cdn.jsdelivr.net/npm/ol@__OL_VERSION__/proj/proj4.js/+esm';
-import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@__PROJ4_VERSION__/+esm';
+  from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/View.js/+esm';
+import WebGLTileLayer from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/layer/WebGLTile.js/+esm';
+import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/layer/Tile.js/+esm';
+import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/source/GeoZarr.js/+esm';
+import OSM from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/source/OSM.js/+esm';
+import {register} from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/proj/proj4.js/+esm';
+import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@2.22.0/+esm';
 
 const $ = (id) => document.getElementById(id);
 
 // ------------------------------------------------------------------ store picker
-// The page ships with its own store baked in; `?store=` (set from the path box) asks the preview
-// server's /api/open endpoint for another one. The server checks the store in Python and returns
-// either a config or a {code, message, hint} error that is shown in the sidebar.
+// `?store=` and the path box open stores directly on static hosts. A page rendered by
+// the preview server uses its /api/open endpoint for local paths and remote-store relaying.
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 const codeify = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
 function storeError(message, hint = '', code = 'error') {
@@ -281,7 +280,116 @@ function showStoreError(e) {
   box.innerHTML = `<div class="msg">${codeify(e.message)}</div>` + (e.hint ? `<div class="hint">${codeify(e.hint)}</div>` : '');
   box.hidden = false;
 }
+// Static hosting reads public stores in the browser; the Python server remains optional.
+function publicStoreUrl(src, endpoint) {
+  if (/^file:/i.test(src)) throw storeError('Serve the store over HTTP to open it here.',
+    'Use a URL or a path relative to this page; local filesystem paths need the preview server.', 'unsupported_scheme');
+  if (/^s3:\/\//i.test(src)) {
+    const u = new URL(src);
+    const base = endpoint ? endpoint.replace(/\/$/, '') + '/' + u.hostname : `https://${u.hostname}.s3.amazonaws.com`;
+    return base + u.pathname;
+  }
+  if (/^(gs|gcs):\/\//i.test(src)) { const u = new URL(src); return `https://storage.googleapis.com/${u.hostname}${u.pathname}`; }
+  const u = new URL(src, location.href);
+  if (!/^https?:$/.test(u.protocol)) throw storeError('Use an HTTP(S) GeoZarr URL.', '', 'unsupported_scheme');
+  return u.href.replace(/\/$/, '');
+}
+async function browserConfig(src, endpoint) {
+  const url = publicStoreUrl(src, endpoint);
+  const metadata = async (path) => {
+    const res = await fetch(`${url}/${path ? path + '/' : ''}zarr.json`);
+    if (!res.ok) throw storeError(`Cannot read GeoZarr metadata (${res.status}).`, 'Check the store URL and public access.', 'not_found');
+    return res.json();
+  };
+  try {
+    const root = await metadata('');
+    const attrs = root.attributes || {};
+    const layout = attrs.multiscales?.layout;
+    if (!layout?.length) throw storeError('This store has no GeoZarr multiscales layout.', 'Open a GeoZarr pyramid, rather than a plain Zarr array.', 'not_pyramid');
+    const level = String(layout.at(-1).asset);
+    const group = root.consolidated_metadata?.metadata?.[level] || await metadata(level);
+    const sdims = group.attributes?.['spatial:dimensions'] || attrs['spatial:dimensions'];
+    if (!sdims?.length) throw storeError('Missing spatial dimensions.', '', 'invalid_pyramid');
+    // Consolidated member metadata avoids directory listings, which static servers cannot provide.
+    const members = group.consolidated_metadata?.metadata || Object.fromEntries(
+      Object.entries(root.consolidated_metadata?.metadata || {})
+        .filter(([path]) => path.startsWith(level + '/'))
+        .map(([path, value]) => [path.slice(level.length + 1), value]));
+    const order = attrs['geozarr_pyramid_maker:variables'] || [];
+    const names = [...new Set([...order, ...Object.keys(members).filter((n) => !n.includes('/'))])];
+    if (!names.length) throw storeError('No array metadata is available.', 'Use a store with consolidated metadata or named variables.', 'invalid_pyramid');
+    const zarr = await import('https://cdn.jsdelivr.net/npm/zarrita@0.7.5/+esm');
+    const zr = zarr.root(new zarr.FetchStore(url));
+    const variables = [], dims = {};
+    for (const name of names) {
+      const meta = members[name] || await metadata(`${level}/${name}`);
+      const dn = meta.dimension_names || [];
+      if (meta.node_type !== 'array' || !sdims.every((d) => dn.includes(d))) continue;
+      const a = meta.attributes || {}, extra = dn.filter((d) => !sdims.includes(d));
+      const arr = await zarr.open(zr.resolve(`${level}/${name}`), {kind: 'array'});
+      const sample = await zarr.get(arr, dn.map((d) => extra.includes(d) ? 0 : null));
+      const values = Array.from(sample.data, Number).filter((v) => Number.isFinite(v) && v !== meta.fill_value).sort((a, b) => a - b);
+      const categorical = a.resampling_method === 'mode' || /^(u?int|bool)/.test(meta.data_type);
+      const quantile = (p) => {
+        const i = (values.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+        return values[lo] + (values[hi] - values[lo]) * (i - lo);
+      };
+      const vmin = values.length ? (categorical ? values[0] : quantile(.02)) : 0;
+      let vmax = values.length ? (categorical ? values.at(-1) : quantile(.98)) : 1;
+      if (vmax <= vmin) vmax = vmin + 1;
+      const v = {name, dims: extra, categorical, units: String(a.units || ''), long_name: String(a.long_name || ''),
+        display_name: String(a.long_name || name), vmin, vmax, ticks: []};
+      if (categorical) {
+        v.values = [...new Set(values)].slice(0, 20);
+        const palette = [[31,119,180],[255,127,14],[44,160,44],[214,39,40],[148,103,189],[140,86,75],[227,119,194],[127,127,127],[188,189,34],[23,190,207]];
+        v.palette = v.values.map((n, i) => [n, palette[i % palette.length]]);
+      }
+      variables.push(v);
+      for (const d of extra) {
+        if (dims[d]) continue;
+        const size = meta.shape[dn.indexOf(d)];
+        dims[d] = {size, labels: null, iso: null};
+        if (size > 5000) continue;
+        try {
+          const coord = await zarr.open(zr.resolve(`${level}/${d}`), {kind: 'array'});
+          const data = Array.from((await zarr.get(coord)).data);
+          const units = coord.attrs.units || '';
+          const match = /^(seconds?|minutes?|hours?|days?) since (.+)$/i.exec(units);
+          const calendar = coord.attrs.calendar || 'standard';
+          if (match && ['standard', 'gregorian', 'proleptic_gregorian'].includes(calendar)) {
+            const scale = {second: 1000, minute: 60000, hour: 3600000, day: 86400000}[match[1].toLowerCase().replace(/s$/, '')];
+            let epoch = match[2].trim().replace(' ', 'T');
+            if (!epoch.includes('T')) epoch += 'T00:00:00';
+            if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(epoch)) epoch += 'Z';
+            const origin = Date.parse(epoch);
+            if (Number.isFinite(origin)) dims[d].iso = data.map((x) => new Date(origin + Number(x) * scale).toISOString());
+          }
+          dims[d].labels = dims[d].iso || data.map(String);
+        } catch (_) { /* index controls work without coordinate arrays */ }
+      }
+    }
+    if (!variables.length) throw storeError('No plottable spatial variables found.', '', 'invalid_pyramid');
+    const code = attrs['proj:code'];
+    const definition = attrs['proj:wkt2'] || attrs['proj:projjson'];
+    if (!code && !definition) throw storeError('Missing CRS metadata.', '', 'invalid_pyramid');
+    const name = code || 'GPM:custom';
+    const builtin = ['EPSG:4326', 'EPSG:3857'].includes(code);
+    if (!builtin && !definition) throw storeError(`No CRS definition for ${code}.`, 'Include proj:wkt2 metadata or use the Python preview server.', 'invalid_pyramid');
+    const bbox = attrs['spatial:bbox'] || group.attributes?.['spatial:bbox'];
+    if (!Array.isArray(bbox) || bbox.length !== 4) throw storeError('Missing spatial bounding box.', '', 'invalid_pyramid');
+    return {...cfg0, title: src.split('/').filter(Boolean).at(-1), source: src, store_url: url, endpoint,
+      variables, dims, attrs: Object.fromEntries(Object.entries(attrs).filter(([k]) =>
+        !['multiscales', 'zarr_conventions', 'geozarr_pyramid_maker:variables'].includes(k) && !/^(proj|spatial):/.test(k))),
+      levels: layout.length, bbox, global: code === 'EPSG:4326' && Math.abs(bbox[2] - bbox[0] - 360) < 1e-6,
+      basemap_default: true, crs: {code, name, proj4: builtin ? null : definition, projection: builtin ? null : name}};
+  } catch (e) {
+    if (e.code) throw e;
+    throw storeError(`Cannot open the GeoZarr store: ${e.message}`, 'Check its metadata and codecs. Remote stores must allow CORS and HTTP Range requests.', 'browser_blocked');
+  }
+}
+
 async function openStore(src, endpoint) {
+  if (!cfg0.api_base) return browserConfig(src, endpoint);
   if (location.protocol === 'file:') {
     throw storeError('Opening other stores needs the preview server.',
       'Run `geozarr-pyramid preview STORE --serve` and use the page it serves.', 'no_server');

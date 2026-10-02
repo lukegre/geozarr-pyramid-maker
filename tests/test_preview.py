@@ -138,8 +138,26 @@ def test_to_pyramid_preview_flag(tiny, tmp_path):
 
 def test_template_is_a_package_resource():
     text = resources.files("geozarr_pyramid_maker").joinpath("templates/preview.html").read_text()
-    for token in ("__CONFIG_JSON__", "__OL_VERSION__", "__TITLE__"):
-        assert token in text
+    assert "__CONFIG_JSON__" not in text and "__OL_VERSION__" not in text
+    cfg = _config(text)
+    assert cfg == pv.blank_config()
+    assert "async function browserConfig" in text
+    assert "if (!cfg0.api_base) return browserConfig(src, endpoint)" in text
+
+
+def test_render_embeds_config_without_changing_script(tiny, tmp_path):
+    store = _pyramid(tiny, tmp_path)
+    cfg = pv.read_config(store)
+    cfg["title"] = "A <title> & label"
+    cfg["store_url"] = "./t.zarr"
+    cfg["attrs"]["description"] = "</script><script>alert(1)</script>"
+    page = pv.render_html(cfg)
+    assert _config(page) == cfg
+    assert "<title>A &lt;title&gt; &amp; label | GeoZarr preview</title>" in page
+    assert (
+        page.split('<script type="module">')[1]
+        == pv.template_text().split('<script type="module">')[1]
+    )
 
 
 def test_view_promise_not_awaited(tiny, tmp_path):
@@ -1051,7 +1069,8 @@ def test_template_relay_fallback(tiny, tmp_path):
         "Relayed through the preview server (the bucket does not allow direct browser access)"
         in html
     )
-    assert "relay" in html.split("'browser_blocked'")[0].split("storeError(")[-1]
+    server_loader = html.split("async function openStore(src, endpoint)")[1]
+    assert "relay" in server_loader.split("'browser_blocked'")[0].split("storeError(")[-1]
 
 
 def test_cli_preview_endpoint_passed_through(tmp_path, monkeypatch):

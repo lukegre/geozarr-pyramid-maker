@@ -2,7 +2,7 @@
 
 ## Status
 - Phase: v0.1 feature-complete (M0–M6 done)
-- Last updated: 2026-10-01
+- Last updated: 2026-10-02
 
 ## Log
 | Date | Step | Status | Notes |
@@ -54,3 +54,5 @@ Push to GitHub and check CI (py3.12–3.14); user browser check of the preview; 
 - [x] M4 Logging+CLI
 - [x] M5 Preview
 - [x] M6 Docs+reference test
+
+- 2026-10-02: Standalone preview HTML (D-35): built-in blank configuration and basemaps, browser GeoZarr loading, optional Python API preserved. Verified direct store loading, raster rendering and time controls in Brave against a Range-capable local host.
