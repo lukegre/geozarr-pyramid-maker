@@ -155,3 +155,29 @@ def test_geotiff_input(regional_utm, tmp_path):
     r = _run("convert", tif, out)
     assert r.exit_code == 0, r.stderr
     assert gpm.is_valid(gpm.validate(out))
+
+
+def test_preview_demo_serves_demo_store(monkeypatch):
+    from importlib import import_module
+
+    pv = import_module("geozarr_pyramid_maker.preview")
+
+    seen = {}
+    monkeypatch.setattr(pv, "serve_viewer", lambda root, **kw: seen.update(root=root, **kw))
+    r = runner.invoke(app, ["preview", "--demo", "--port", "8765"])
+    assert r.exit_code == 0, r.output
+    assert seen["start"] == (pv.DEMO_STORE, pv.DEMO_ENDPOINT)
+    assert seen["port"] == 8765 and seen["root"] == "."
+
+
+@pytest.mark.parametrize(
+    "extra", [["s3://b/a.zarr"], ["--endpoint", "https://x"], ["--serve"], ["--out", "o.html"]]
+)
+def test_preview_demo_conflicts(monkeypatch, extra):
+    from importlib import import_module
+
+    pv = import_module("geozarr_pyramid_maker.preview")
+
+    monkeypatch.setattr(pv, "serve_viewer", lambda *a, **k: pytest.fail("must not serve"))
+    r = runner.invoke(app, ["preview", "--demo", *extra])
+    assert r.exit_code == 2

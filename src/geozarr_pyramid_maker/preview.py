@@ -18,7 +18,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 import numpy as np
 import pyproj
@@ -30,6 +30,8 @@ from .metadata import VARIABLES_ATTR
 
 OL_VERSION = "10.10.0"
 PROJ4_VERSION = "2.22.0"
+DEMO_STORE = "s3://spi-greenfjord-public/test/mur_sst_subset.zarr"
+DEMO_ENDPOINT = "https://os.zhdk.cloud.switch.ch"
 SYNTHETIC_CRS = "GPM:custom"
 _BUILTIN_CRS = ("EPSG:4326", "EPSG:3857")
 _URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
@@ -783,10 +785,27 @@ class RangeHandler(SimpleHTTPRequestHandler):
             return True
         return False
 
+    def _redirect_to_start(self) -> bool:
+        """302 the viewer root (empty query) to ``?store=…`` when the server has a start store."""
+        start = getattr(self.server, "start", None)
+        parts = urlsplit(self.path)
+        if not start or parts.path != "/" or parts.query:
+            return False
+        params = {"store": start[0]}
+        if start[1]:
+            params["endpoint"] = start[1]
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", f"{self.server.base_path}/?{urlencode(params)}")  # type: ignore[attr-defined]
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
+
     def do_GET(self) -> None:
         if self._redirect_or_outside():
             return
         path = urlsplit(self.path).path
+        if self._redirect_to_start():
+            return
         if path == "/api/open":
             self._api_open()
             return
@@ -902,6 +921,8 @@ class RangeHandler(SimpleHTTPRequestHandler):
             return
         if urlsplit(self.path).path.startswith(f"/{REMOTE_PREFIX}/"):
             self._send_remote(head=True)
+            return
+        if self._redirect_to_start():
             return
         self._send_file(head=True)
 
@@ -1142,13 +1163,19 @@ def serve_viewer(
     base_path: str = "",
     open_browser: bool = False,
     on_ready: Callable[[str], None] | None = None,
+    start: tuple[str, str | None] | None = None,
 ) -> None:
     """Serve the blank viewer at ``<base_path>/`` until Ctrl-C.
 
     Relative store paths resolve from ``root``. Use ``host="0.0.0.0"`` inside a container.
+    ``start`` is a (store, endpoint) pair: the viewer root with an empty query then redirects
+    to ``?store=…&endpoint=…`` (D-34); any request with a query string is served unchanged.
     """
     server = make_server(Path(root).resolve(), port, host=host, base_path=base_path)
     server.blank_viewer = True  # type: ignore[attr-defined]
+    server.start = start  # type: ignore[attr-defined]
+    if start:
+        logger.info("Viewer opens on demo store {} (endpoint {})", start[0], start[1])
     shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
     url = f"http://{shown}:{server.server_address[1]}{server.base_path}/"  # type: ignore[attr-defined]
     logger.info("Serving the GeoZarr viewer at {} (Ctrl-C to stop)", url)
