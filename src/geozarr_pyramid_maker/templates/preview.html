@@ -115,6 +115,16 @@
   .card .top { display: flex; align-items: flex-start; gap: var(--sp); }
   .card .name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
   .card .meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
+  .cardsec { display: flex; flex-direction: column; gap: var(--sp); }
+  .cardsec[hidden], .seccards[hidden] { display: none; }
+  .seccards { display: flex; flex-direction: column; gap: var(--sp); }
+  .sechead { margin: 0; padding: 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); }
+  .sectoggle { display: flex; align-items: center; gap: 4px; border: 0; background: none; cursor: pointer;
+    font-family: inherit; text-align: left; }
+  .sectoggle:hover { color: var(--text); }
+  .sectoggle .chev { width: 12px; height: 12px; transition: transform .15s; }
+  .sectoggle[aria-expanded="false"] .chev { transform: rotate(-90deg); }
   #selhint { padding: 0 var(--sp); margin-top: var(--sp); font-size: 11px; color: var(--muted); }
   .card .gear { display: none; }
   .card.active .gear { display: grid; }
@@ -235,7 +245,19 @@
       title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
   </div>
   <div id="selhint" hidden>Click cards to show several variables at once; the last one selected is drawn on top.</div>
-  <div id="cards"></div>
+  <div id="cards">
+    <section id="sec-selected" class="cardsec" hidden>
+      <h2 class="sechead" id="sel-head">Selected</h2>
+      <div id="sel-cards" class="seccards"></div>
+    </section>
+    <section id="sec-other" class="cardsec" hidden>
+      <button type="button" id="other-toggle" class="sechead sectoggle" aria-expanded="true" aria-controls="other-cards">
+        <svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="other-label">Other</span>
+      </button>
+      <div id="other-cards" class="seccards"></div>
+    </section>
+  </div>
   <div id="sbfoot">
     <label for="basemap">Basemap</label>
     <select id="basemap"></select>
@@ -499,12 +521,14 @@ function initStorePicker() {
 }
 const showError = (e) => { console.error(e); $('error').textContent = String(e && e.message || e); };
 const SIDEBAR_KEY = 'gpm-preview:sidebar-collapsed';
+const OTHER_KEY = 'gpm-preview:other-collapsed';
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* storage unavailable */ } },
   remove(k) { try { localStorage.removeItem(k); } catch (_) { /* storage unavailable */ } },
 };
 if (location.protocol === 'file:') $('note').hidden = false;
+let otherCollapsed = store.get(OTHER_KEY) === '1';
 if (store.get(SIDEBAR_KEY) === '1') document.body.classList.add('collapsed');
 
 // The CRS has to be registered before the GeoZarr source resolves it.
@@ -750,7 +774,7 @@ function buildLegend(v) {
 const cards = new window.Map();
 
 function buildCards() {
-  const box = $('cards');
+  const box = $('sel-cards');
   for (const v of cfg.variables) {
     const card = h('div', 'card');
     card.tabIndex = 0;
@@ -887,6 +911,18 @@ function buildStyleControls(v, opts, entry) {
 }
 
 function refreshCards() {
+  const selBox = $('sel-cards'), otherBox = $('other-cards');
+  const order = [...state.selected].reverse();
+  const others = cfg.variables.map((v) => v.name).filter((n) => !state.selected.includes(n));
+  selBox.append(...order.map((n) => cards.get(n).el));
+  otherBox.append(...others.map((n) => cards.get(n).el));
+  const n = cards.size;
+  $('sec-selected').hidden = n === 0;
+  $('sec-other').hidden = others.length === 0;
+  $('sel-head').textContent = `Selected (${order.length})`;
+  $('other-label').textContent = `Other (${others.length})`;
+  $('other-toggle').setAttribute('aria-expanded', String(!otherCollapsed));
+  otherBox.hidden = otherCollapsed;
   for (const [name, c] of cards) {
     const active = state.selected.includes(name);
     const open = active && state.open.has(name);
@@ -896,6 +932,12 @@ function refreshCards() {
     c.gear.setAttribute('aria-expanded', String(open));
   }
 }
+
+$('other-toggle').addEventListener('click', () => {
+  otherCollapsed = !otherCollapsed;
+  store.set(OTHER_KEY, otherCollapsed ? '1' : '0');
+  refreshCards();
+});
 
 function buildInfo() {
   const panel = $('infopanel');

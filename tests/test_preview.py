@@ -1300,3 +1300,20 @@ def test_no_start_no_redirect(tmp_path):
 def test_demo_constants():
     assert pv.DEMO_STORE == "s3://spi-greenfjord-public/test/mur_sst_subset.zarr"
     assert pv.DEMO_ENDPOINT == "https://os.zhdk.cloud.switch.ch"
+
+
+def test_template_sidebar_sections(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert html.index('id="s3row"') < html.index('id="cards"')
+    assert html.index('id="cards"') < html.index('id="sec-selected"') < html.index('id="sec-other"')
+    assert 'id="sel-cards"' in html and 'id="other-cards"' in html
+    assert (
+        'id="other-toggle"' in html
+        and "aria-expanded" in html.split('id="other-toggle"', 1)[1][:200]
+    )
+    assert "const OTHER_KEY = 'gpm-preview:other-collapsed'" in html
+    assert "let otherCollapsed = store.get(OTHER_KEY) === '1'" in html
+    assert "store.set(OTHER_KEY, otherCollapsed" in html
+    body = html.split("function refreshCards()", 1)[1].split("\nfunction ", 1)[0]
+    assert "[...state.selected].reverse()" in body
+    assert "append(" in body and "Selected (" in body and "Other (" in body
