@@ -1,5 +1,7 @@
 # geozarr-pyramid-maker
 
+> **Experimental.** Docs: <https://lukegre.github.io/geozarr-pyramid-maker/> · Hosted viewer: <https://lukegre.github.io/geozarr-pyramid-maker/viewer/>. APIs, output layout and the viewer may change without notice.
+
 Turn any regular-grid xarray Dataset (NetCDF, Zarr, GeoTIFF) into a **GeoZarr multiscale pyramid**: Zarr v3, sharded,
 in the native CRS, with the modular GeoZarr conventions and CF `grid_mapping` metadata. One call, no required options:
 `ds.geozarr.to_pyramid("out.zarr")`. Everything is lazy with dask, so data larger than memory is fine. The result is

@@ -25,3 +25,6 @@ htmlcov/
 
 # preview pages generated next to stores
 *.preview.html
+
+# mkdocs build output
+site/
