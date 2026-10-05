@@ -70,3 +70,6 @@ dev = [
     "requests>=2.34.2",
     "ruff>=0.16.9",
 ]
+docs = [
+    "mkdocs-material>=9.7.7",
+]

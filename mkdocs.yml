@@ -1,0 +1,53 @@
+site_name: geozarr-pyramid-maker
+site_description: Experimental GeoZarr multiscale pyramids from regular-grid xarray data
+site_url: https://lukegre.github.io/geozarr-pyramid-maker/
+repo_url: https://github.com/lukegre/geozarr-pyramid-maker
+repo_name: lukegre/geozarr-pyramid-maker
+edit_uri: edit/main/docs/
+docs_dir: docs
+exclude_docs: |
+  PROGRESS.md
+  research/
+
+theme:
+  name: material
+  custom_dir: overrides
+  features:
+    - content.code.copy
+    - navigation.top
+    - navigation.sections
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - How it works: how-it-works.md
+  - Viewer: viewer.md
+  - Open viewer ↗: https://lukegre.github.io/geozarr-pyramid-maker/viewer/
+  - Design:
+      - Plan: PLAN.md
+      - Decisions: DECISIONS.md

@@ -1,0 +1,20 @@
+.md-banner {
+  background-color: #b71c1c;
+  color: #fff;
+}
+.experimental-banner {
+  max-width: 61rem;
+  margin: 0 auto;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+  background-color: #ffb300;
+  color: #1a1a1a;
+  border-radius: 0.2rem;
+}
+[data-md-color-scheme="slate"] .experimental-banner {
+  background-color: #ff8f00;
+  color: #111;
+}
+.md-banner--warning { background: transparent; }
