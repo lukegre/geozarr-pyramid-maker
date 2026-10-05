@@ -9,6 +9,13 @@ The page loads its JavaScript dependencies and basemap tiles from the internet.
 
 **[Open the viewer](viewer/){ .md-button .md-button--primary }**
 
+## Variable cards
+
+The sidebar lists the variables in two sections. **Selected (n)** holds the variables currently shown, top-most layer
+first; **Other (n)** holds the rest in dataset order and can be collapsed with its header (the choice is remembered in
+the browser). Clicking a card moves it between the sections. At least one variable stays selected, and the Other
+section is hidden when every variable is selected.
+
 ## URL parameters
 
 | Parameter | Meaning |
