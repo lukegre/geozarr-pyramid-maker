@@ -164,7 +164,8 @@ def test_view_promise_not_awaited(tiny, tmp_path):
     # Map's `view` option takes Promise<ViewOptions>; awaiting it hands Map a plain object.
     _, _, html = _generate(tiny, tmp_path)
     assert "await getView" not in html
-    assert "getView(state.vlayers.get(state.selected[0]).sources[0]" in html
+    assert "getView(initial.sources[0]" in html
+    assert "state.vlayers.get(state.selected[0]) || makeLayers(cfg.variables[0])" in html
 
 
 def test_missing_store(tmp_path):
@@ -834,7 +835,9 @@ def test_template_multi_variable_selection(tiny, tmp_path):
         and "function addVariable" in html
         and "function removeVariable" in html
     )
-    assert "state.selected.length === 1" in html  # at least one stays selected
+    assert "function toggleVisibility" in html
+    assert "state.hidden" in html
+    assert "state.selected.length === 1" not in html  # every card can be removed
     assert "function unionDims" in html or "const unionDims" in html
     assert "function styleParams" in html and "`${k}.${v.name}`" in html
     assert "state.opacity[v.name]" in html and 'id="selhint"' in html
@@ -1317,3 +1320,36 @@ def test_template_sidebar_sections(tiny, tmp_path):
     body = html.split("function refreshCards()", 1)[1].split("\nfunction ", 1)[0]
     assert "[...state.selected].reverse()" in body
     assert "append(" in body and "Selected (" in body and "Other (" in body
+
+
+def test_viewer_selection_drag_behaviour():
+    """Run viewer handlers for visibility, removal, drag order, labels and layer reuse."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_selection.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_viewer_uses_array_names():
+    html = pv.render_html(None)
+    assert "top.append(handle, h('div', 'name', v.name))" in html
+    assert "v.display_name || v.name" not in html
+    assert "if (v.long_name?.trim()) opts.append" in html
+    assert "v.display_name || v.long_name" in html
+    assert ".card.selected.open .opts" in html
+    assert "params.get('var') === ''" in html
+    assert "q.set('hidden', hidden.join(','))" in html

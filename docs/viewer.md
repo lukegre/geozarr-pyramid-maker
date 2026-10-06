@@ -13,8 +13,11 @@ The page loads its JavaScript dependencies and basemap tiles from the internet.
 
 The sidebar lists the variables in two sections. **Selected (n)** holds the variables currently shown, top-most layer
 first; **Other (n)** holds the rest in dataset order and can be collapsed with its header (the choice is remembered in
-the browser). Clicking a card moves it between the sections. At least one variable stays selected, and the Other
-section is hidden when every variable is selected.
+the browser). Cards show the array names. Clicking an Other card adds it to Selected; clicking a selected card keeps
+it selected. The eye icon shows or hides its map layer while keeping the card in Selected; the × icon removes it
+to Other. Expand settings to see the long name when available. Drag a card by its handle to reorder Selected or move
+it between sections. The map follows the selected card order. All cards can be removed. Other remains visible as a
+drop target even when it is empty or collapsed. Visibility is preserved in shared URLs with `hidden=a,b`.
 
 ## URL parameters
 

@@ -117,6 +117,10 @@
   .card .meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
   .cardsec { display: flex; flex-direction: column; gap: var(--sp); }
   .cardsec[hidden], .seccards[hidden] { display: none; }
+  .draghandle { cursor: grab; touch-action: none; }
+  .card.dragging { opacity: .45; }
+  .cardsec.drop-target { outline: 2px dashed var(--accent); outline-offset: 2px; }
+  .card.drop-before { border-top: 3px solid var(--accent); }
   .seccards { display: flex; flex-direction: column; gap: var(--sp); }
   .sechead { margin: 0; padding: 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
     text-transform: uppercase; color: var(--muted); }
@@ -126,12 +130,13 @@
   .sectoggle .chev { width: 12px; height: 12px; transition: transform .15s; }
   .sectoggle[aria-expanded="false"] .chev { transform: rotate(-90deg); }
   #selhint { padding: 0 var(--sp); margin-top: var(--sp); font-size: 11px; color: var(--muted); }
-  .card .gear { display: none; }
-  .card.active .gear { display: grid; }
+  .card .gear, .card .visibility, .card .remove { display: none; }
+  .card.selected .gear, .card.selected .visibility, .card.selected .remove { display: grid; }
   .card .gear[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .card .opts { display: none; flex-direction: column; gap: var(--sp); margin-top: var(--sp);
     font-size: 12px; color: var(--muted); cursor: default; }
-  .card.active.open .opts { display: flex; }
+  .card.selected.open .opts { display: flex; }
+  .card .opts .longname { color: var(--text); overflow-wrap: anywhere; }
   .card .opts .row { display: flex; align-items: center; gap: var(--sp); }
   .card .opts .row > label { flex: none; width: 64px; }
   .card .opts input[type=range] { flex: 1; min-width: 0; }
@@ -244,7 +249,7 @@
       placeholder="https://os.zhdk.cloud.switch.ch"
       title="Custom S3 service for s3:// stores. Press Enter to open the store with it.">
   </div>
-  <div id="selhint" hidden>Click cards to show several variables at once; the last one selected is drawn on top.</div>
+  <div id="selhint" hidden>Click to select. Use the eye to show or hide, and × to remove. Drag handles to reorder. The top card is drawn on top.</div>
   <div id="cards">
     <section id="sec-selected" class="cardsec" hidden>
       <h2 class="sechead" id="sel-head">Selected</h2>
@@ -602,7 +607,7 @@ function colorExpr(v) {
 
 // selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources}.
 const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, opacity: {}, vlayers: new window.Map(),
-  map: null, scrub: null, scrubKey: null, timer: null, open: new Set()};
+  map: null, scrub: null, scrubKey: null, timer: null, open: new Set(), hidden: new Set()};
 const varOf = (name) => cfg.variables.find((v) => v.name === name);
 const selVars = () => state.selected.map(varOf);
 const opacityOf = (name) => (state.opacity[name] === undefined ? 1 : state.opacity[name]);
@@ -652,7 +657,10 @@ function styleParams(vars) {
   if (blank) return;
   const names = [];
   for (const n of (params.get('var') || '').split(',')) if (varOf(n) && !names.includes(n)) names.push(n);
-  if (names.length) state.selected = names;
+  if (names.length || params.get('var') === '') state.selected = names;
+  for (const name of (params.get('hidden') || '').split(',')) {
+    if (state.selected.includes(name)) state.hidden.add(name);
+  }
   for (const d of Object.keys(cfg.dims)) {
     const raw = params.get(d);
     if (raw === null) continue;
@@ -688,6 +696,8 @@ function syncUrl() {
       q.set('store', cfg.source);
       if (cfg.endpoint && /^s3:\/\//i.test(cfg.source)) q.set('endpoint', cfg.endpoint);
       q.set('var', state.selected.join(','));
+      const hidden = state.selected.filter((name) => state.hidden.has(name));
+      if (hidden.length) q.set('hidden', hidden.join(','));
       for (const d of unionDims()) q.set(d, dimToParam(d, state.dims[d] || 0));
       for (const [k, val] of styleParams(vars)) q.set(k, val);
     }
@@ -714,6 +724,8 @@ function h(tag, cls, text) {
 }
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 const ICON = {
+  eye: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" fill="none" stroke="currentColor"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>',
+  eyeOff: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5zM2 2l12 12" fill="none" stroke="currentColor"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>',
   play: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>',
   pause: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>',
   prev: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -772,6 +784,46 @@ function buildLegend(v) {
 }
 
 const cards = new window.Map();
+let draggedVariable = null;
+
+function clearDragFeedback() {
+  for (const id of ['sec-selected', 'sec-other']) $(id).classList.remove('drop-target');
+  for (const c of cards.values()) c.el.classList.remove('drop-before');
+}
+
+function selectedDropBefore(y) {
+  return [...state.selected].reverse().find((name) => {
+    if (name === draggedVariable) return false;
+    const rect = cards.get(name).el.getBoundingClientRect();
+    return y < rect.top + rect.height / 2;
+  }) || null;
+}
+
+function initCardDragging() {
+  for (const [id, selected] of [['sec-selected', true], ['sec-other', false]]) {
+    const section = $(id);
+    section.addEventListener('dragover', (e) => {
+      if (!draggedVariable) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clearDragFeedback();
+      section.classList.add('drop-target');
+      const before = selected ? selectedDropBefore(e.clientY) : null;
+      if (before) cards.get(before).el.classList.add('drop-before');
+    });
+    section.addEventListener('dragleave', (e) => {
+      if (!section.contains(e.relatedTarget)) clearDragFeedback();
+    });
+    section.addEventListener('drop', (e) => {
+      if (!draggedVariable) return;
+      e.preventDefault();
+      const name = draggedVariable;
+      const before = selected ? selectedDropBefore(e.clientY) : null;
+      clearDragFeedback();
+      moveVariable(name, selected, before);
+    });
+  }
+}
 
 function buildCards() {
   const box = $('sel-cards');
@@ -780,19 +832,46 @@ function buildCards() {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     const top = h('div', 'top');
-    top.append(h('div', 'name', v.display_name || v.name));
+    const handle = h('span', 'iconbtn draghandle', '⠿');
+    handle.setAttribute('role', 'img');
+    handle.draggable = true;
+    handle.title = 'Drag to reorder or move between Selected and Other';
+    handle.setAttribute('aria-label', `Drag ${v.name}`);
+    handle.addEventListener('click', (e) => e.stopPropagation());
+    handle.addEventListener('dragstart', (e) => {
+      draggedVariable = v.name;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', v.name);
+      e.dataTransfer.setDragImage(card, 20, 20);
+      card.classList.add('dragging');
+    });
+    handle.addEventListener('dragend', () => {
+      draggedVariable = null;
+      card.classList.remove('dragging');
+      clearDragFeedback();
+    });
+    top.append(handle, h('div', 'name', v.name));
     const gear = h('button', 'iconbtn gear');
     gear.type = 'button';
     gear.innerHTML = ICON.gear;
     gear.setAttribute('aria-label', 'Layer options');
     gear.setAttribute('aria-expanded', 'false');
-    top.append(gear);
+    const visibility = h('button', 'iconbtn visibility');
+    visibility.type = 'button';
+    visibility.addEventListener('click', (e) => { e.stopPropagation(); toggleVisibility(v.name); });
+    const remove = h('button', 'iconbtn remove', '×');
+    remove.type = 'button';
+    remove.title = 'Remove from Selected';
+    remove.setAttribute('aria-label', `Remove ${v.name} from Selected`);
+    remove.addEventListener('click', (e) => { e.stopPropagation(); moveVariable(v.name, false); });
+    top.append(visibility, gear, remove);
     card.append(top);
     const meta = [unitsOf(v), ...v.dims].filter(Boolean).join(' · ');
     if (meta) card.append(h('div', 'meta', meta));
     const legend = buildLegend(v);
     card.append(legend);
     const opts = h('div', 'opts');
+    if (v.long_name?.trim()) opts.append(h('div', 'longname', v.display_name || v.long_name));
     const slider = h('input');
     slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = opacityOf(v.name);
     slider.setAttribute('aria-label', 'Opacity');
@@ -800,7 +879,7 @@ function buildCards() {
     const olab = h('label', '', 'Opacity');
     orow.append(olab, slider);
     opts.append(orow);
-    const entry = {el: card, gear, slider, legend, sync: null};
+    const entry = {el: card, gear, visibility, slider, legend, sync: null};
     if (!v.categorical) entry.sync = buildStyleControls(v, opts, entry);
     opts.addEventListener('click', (e) => e.stopPropagation());
     card.append(opts);
@@ -918,7 +997,7 @@ function refreshCards() {
   otherBox.append(...others.map((n) => cards.get(n).el));
   const n = cards.size;
   $('sec-selected').hidden = n === 0;
-  $('sec-other').hidden = others.length === 0;
+  $('sec-other').hidden = n === 0;  // keep an empty drop target when all are selected
   $('sel-head').textContent = `Selected (${order.length})`;
   $('other-label').textContent = `Other (${others.length})`;
   $('other-toggle').setAttribute('aria-expanded', String(!otherCollapsed));
@@ -926,7 +1005,14 @@ function refreshCards() {
   for (const [name, c] of cards) {
     const active = state.selected.includes(name);
     const open = active && state.open.has(name);
-    c.el.classList.toggle('active', active);
+    const visible = active && !state.hidden.has(name);
+    c.el.classList.toggle('selected', active);
+    c.el.classList.toggle('active', visible);
+    c.visibility.innerHTML = state.hidden.has(name) ? ICON.eyeOff : ICON.eye;
+    const action = `${visible ? 'Hide' : 'Show'} ${name}`;
+    c.visibility.title = action;
+    c.visibility.setAttribute('aria-label', action);
+    c.visibility.setAttribute('aria-pressed', String(visible));
     c.el.classList.toggle('open', open);
     c.el.setAttribute('aria-pressed', String(active));
     c.gear.setAttribute('aria-expanded', String(open));
@@ -1251,7 +1337,7 @@ function updateSpine() {
     $('sbspine').firstElementChild.replaceChildren(h('i', null, 'no store loaded'));
     return;
   }
-  const names = selVars().map((v) => v.display_name || v.name).join(', ');
+  const names = selVars().map((v) => v.name).join(', ');
   const span = $('sbspine').firstElementChild;
   span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '), h('i', null, names));
   $('sbspine').title = `${cfg.source || cfg.title} · ${names}`;
@@ -1272,11 +1358,48 @@ function removeVariable(name) {
 }
 
 function toggleVar(name) {
+  // Clicking an already-selected card never removes or reorders it.
+  if (state.selected.includes(name)) return;
+  moveVariable(name, true, state.selected.at(-1) || null);
+}
+
+function toggleVisibility(name) {
+  if (!state.selected.includes(name)) return;
+  const visible = state.hidden.has(name);
+  if (visible) state.hidden.delete(name); else state.hidden.add(name);
+  for (const layer of state.vlayers.get(name)?.layers || []) layer.setVisible(visible);
+  refreshCards();
+  syncUrl();
+  $('readout').hidden = true;
+}
+
+function moveVariable(name, selected, before = null) {
+  if (!cards.has(name)) return;
   const i = state.selected.indexOf(name);
-  if (i >= 0 && state.selected.length === 1) return;  // keep at least one selected
+  if (!selected && i < 0) return;
+  if (selected && before === name) return;
   stopPlay();
-  if (i >= 0) { state.selected.splice(i, 1); removeVariable(name); }
-  else { state.selected.push(name); addVariable(name); }
+  if (i >= 0) state.selected.splice(i, 1);
+  if (selected) {
+    // The sidebar is top-first; state.selected is bottom-first for the map.
+    const order = [...state.selected].reverse();
+    const index = before === null ? order.length : order.indexOf(before);
+    order.splice(index < 0 ? order.length : index, 0, name);
+    state.selected = order.reverse();
+    if (i < 0) addVariable(name);
+    // Reuse existing layers (and their sources/styles) in the new stacking order.
+    const layers = state.map.getLayers();
+    for (const n of state.selected) {
+      for (const layer of state.vlayers.get(n).layers) layers.remove(layer);
+    }
+    for (const n of state.selected) {
+      for (const layer of state.vlayers.get(n).layers) layers.push(layer);
+    }
+  } else {
+    state.hidden.delete(name);
+    state.open.delete(name);
+    removeVariable(name);
+  }
   syncUrl();
   updateSpine();
   refreshCards();
@@ -1331,7 +1454,7 @@ function initReadout(map) {
     const lines = [];
     for (const name of [...state.selected].reverse()) {  // top-most first
       const vl = state.vlayers.get(name);
-      if (!vl) continue;
+      if (!vl || state.hidden.has(name)) continue;
       let val = null;
       try {
         for (const l of vl.layers) {
@@ -1342,7 +1465,7 @@ function initReadout(map) {
       if (val === null || !Number.isFinite(val)) continue;
       const v = varOf(name);
       const u = unitsOf(v);
-      lines.push(`${v.display_name || v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
+      lines.push(`${v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
     }
     if (!lines.length) return hide();
     ro.replaceChildren(...lines.map((t) => h('div', '', t)));
@@ -1375,14 +1498,23 @@ function init() {
     return;
   }
   buildCards();
+  initCardDragging();
   refreshCards();
   buildScrubber();
-  for (const name of state.selected) state.vlayers.set(name, makeLayers(varOf(name)));
+  for (const name of state.selected) {
+    const vl = makeLayers(varOf(name));
+    for (const layer of vl.layers) layer.setVisible(!state.hidden.has(name));
+    state.vlayers.set(name, vl);
+  }
   const dataLayers = state.selected.flatMap((n) => state.vlayers.get(n).layers);
   // Pass a promise: Map's `view` option accepts Promise<ViewOptions> and resolves it. The resolved
   // options are adjusted for the centre longitude.
-  const view = getView(state.vlayers.get(state.selected[0]).sources[0], withLowerResolutions(1), withHigherResolutions(2),
-    withExtentCenter(), withZoom(2)).then(viewFor);
+  const detachedInitial = !state.selected.length;
+  const initial = state.vlayers.get(state.selected[0]) || makeLayers(cfg.variables[0]);
+  const view = getView(initial.sources[0], withLowerResolutions(1), withHigherResolutions(2),
+    withExtentCenter(), withZoom(2)).then(viewFor).finally(() => {
+      if (detachedInitial) for (const layer of initial.layers) layer.dispose?.();
+    });
   view.catch(showError);
   state.map = new Map({target: 'map', layers: [...basemaps, ...dataLayers], view});
   initReadout(state.map);
