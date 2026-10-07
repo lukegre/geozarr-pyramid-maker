@@ -221,6 +221,7 @@
   #readout { position: fixed; left: 0; top: 0; z-index: 8; pointer-events: none; padding: 2px 8px;
     border-radius: 6px; background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line);
     font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #readout .ro-coord { color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -289,6 +290,7 @@ import TileLayer from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/layer/Tile.js/+es
 import GeoZarr from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/source/GeoZarr.js/+esm';
 import OSM from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/source/OSM.js/+esm';
 import {register} from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/proj/proj4.js/+esm';
+import {toLonLat} from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/proj.js/+esm';
 import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@2.22.0/+esm';
 
 const $ = (id) => document.getElementById(id);
@@ -1446,6 +1448,21 @@ function initBasemap() {
   return Object.values(layers);
 }
 
+// "lat 46.520°N, lon 6.630°E" for a view-projection coordinate, or null when it is outside the data
+// extent (unless `force`) or the transform is not finite. Lon is normalised to [-180, 180).
+function coordLine(map, coord, force) {
+  let [x, y] = coord;
+  const b = cfg.bbox;
+  if (cfg.global) x = normLon(x);  // map shows +-360 copies of the world
+  const over = b && x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
+  if (!over && !force) return null;
+  const [lon0, lat] = toLonLat([x, y], map.getView().getProjection());
+  if (!Number.isFinite(lon0) || !Number.isFinite(lat)) return null;
+  const lon = normLon(lon0);
+  const f = (v, p, n) => `${Math.abs(v).toFixed(3)}°${+v.toFixed(3) < 0 ? n : p}`;  // no "0.000°S"
+  return `lat ${f(lat, 'N', 'S')}, lon ${f(lon, 'E', 'W')}`;
+}
+
 function initReadout(map) {
   const ro = $('readout');
   const hide = () => { ro.hidden = true; };
@@ -1467,8 +1484,9 @@ function initReadout(map) {
       const u = unitsOf(v);
       lines.push(`${v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
     }
-    if (!lines.length) return hide();
-    ro.replaceChildren(...lines.map((t) => h('div', '', t)));
+    const coord = coordLine(map, e.coordinate, lines.length > 0);
+    if (!lines.length && !coord) return hide();
+    ro.replaceChildren(...(coord ? [h('div', 'ro-coord', coord)] : []), ...lines.map((t) => h('div', '', t)));
     ro.hidden = false;
     const o = e.originalEvent;
     const w = ro.offsetWidth, hgt = ro.offsetHeight;
