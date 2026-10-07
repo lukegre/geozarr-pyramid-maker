@@ -845,6 +845,15 @@ def test_template_multi_variable_selection(tiny, tmp_path):
     assert "[...state.selected].reverse()" in html  # readout: top-most first
 
 
+def test_template_readout_latlon_line(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "ol@10.10.0/proj.js/+esm" in html and "toLonLat" in html
+    assert "map.getView().getProjection()" in html  # transform from the view CRS
+    assert "function coordLine" in html
+    assert "ro-coord" in html and "`lat ${" in html and "lon ${" in html
+    assert "normLon(" in html  # lon normalised for +-360 copies
+
+
 def test_template_collapsed_spine(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert 'id="sbspine"' in html and "writing-mode: vertical-rl" in html
