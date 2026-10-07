@@ -221,7 +221,7 @@
   #readout { position: fixed; left: 0; top: 0; z-index: 8; pointer-events: none; padding: 2px 8px;
     border-radius: 6px; background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line);
     font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  #readout .ro-coord { color: var(--muted); font-size: 11px; }
+  #readout .ro-coord { color: var(--muted); font-size: 11px; white-space: pre; }
 </style>
 </head>
 <body>
@@ -1448,7 +1448,7 @@ function initBasemap() {
   return Object.values(layers);
 }
 
-// "lat 46.520°N, lon 6.630°E" for a view-projection coordinate, or null when it is outside the data
+// "Lat: 46.520°N  Lon: 6.630°E" for a view-projection coordinate, or null when it is outside the data
 // extent (unless `force`) or the transform is not finite. Lon is normalised to [-180, 180).
 function coordLine(map, coord, force) {
   let [x, y] = coord;
@@ -1460,7 +1460,40 @@ function coordLine(map, coord, force) {
   if (!Number.isFinite(lon0) || !Number.isFinite(lat)) return null;
   const lon = normLon(lon0);
   const f = (v, p, n) => `${Math.abs(v).toFixed(3)}°${+v.toFixed(3) < 0 ? n : p}`;  // no "0.000°S"
-  return `lat ${f(lat, 'N', 'S')}, lon ${f(lon, 'E', 'W')}`;
+  return `Lat: ${f(lat, 'N', 'S')}  Lon: ${f(lon, 'E', 'W')}`;
+}
+
+// Raw band-0 value under `coordinate`, read from the layer renderer's loaded-tile cache (null if none/NaN).
+// WebGLTileLayer.getData is not usable: with the jsdelivr +esm bundles the GeoZarr source's DataTile
+// is not the DataTile class WebGLTile checks with instanceof, and the source itself caches no tiles.
+// Edge tiles are smaller than the grid tile size, so pixels are addressed by resolution, not extent.
+function sampleLayer(layer, source, coordinate) {
+  const cache = layer.getRenderer?.()?.tileRepresentationCache;
+  const grid = source.getTileGrid();
+  if (!cache || !grid) return null;
+  const [cx, cy] = coordinate;
+  let best = null;
+  cache.forEach((rep) => {
+    const tile = rep && rep.loaded && rep.tile;
+    if (!tile || tile.getState() !== 2) return;  // 2 = TileState.LOADED
+    const tc = tile.tileCoord;
+    if (best && best.z >= tc[0]) return;
+    const ext = grid.getTileCoordExtent(tc);
+    const res = grid.getResolution(tc[0]);
+    const col = Math.floor((cx - ext[0]) / res), row = Math.floor((ext[3] - cy) / res);
+    const [w, h] = tile.getSize();
+    if (col < 0 || row < 0 || col >= w || row >= h) return;
+    best = {z: tc[0], tile, col, row, g: rep.gutter || 0, w, h};
+  });
+  if (!best) return null;
+  const {tile, col, row, g, w, h} = best;
+  const data = tile.getData();
+  if (!data || !data.length) return null;
+  const bands = Math.max(1, Math.round(data.length / ((w + 2 * g) * (h + 2 * g))));
+  const px = ((row + g) * (w + 2 * g) + col + g) * bands;
+  if (bands > 1 && !data[px + bands - 1]) return null;  // last band is alpha; 0 = nodata
+  const val = data[px];
+  return Number.isFinite(val) ? val : null;
 }
 
 function initReadout(map) {
@@ -1473,20 +1506,18 @@ function initReadout(map) {
       const vl = state.vlayers.get(name);
       if (!vl || state.hidden.has(name)) continue;
       let val = null;
-      try {
-        for (const l of vl.layers) {
-          const data = l.getData(e.pixel);
-          if (data && data.length && Number.isFinite(data[0])) { val = data[0]; break; }
-        }
-      } catch (_) { /* layer not rendered yet */ }
-      if (val === null || !Number.isFinite(val)) continue;
+      for (let i = 0; i < vl.layers.length; i++) {  // global mode: 3 world copies (0, -360, +360); first finite wins
+        try { val = sampleLayer(vl.layers[i], vl.sources[i], e.coordinate); } catch (_) { val = null; }  // not rendered yet
+        if (val !== null) break;
+      }
+      if (val === null) continue;
       const v = varOf(name);
       const u = unitsOf(v);
       lines.push(`${v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
     }
     const coord = coordLine(map, e.coordinate, lines.length > 0);
     if (!lines.length && !coord) return hide();
-    ro.replaceChildren(...(coord ? [h('div', 'ro-coord', coord)] : []), ...lines.map((t) => h('div', '', t)));
+    ro.replaceChildren(...(coord ? [h('div', 'ro-coord', coord)] : []), ...lines.map((t) => h('div', 'ro-val', t)));
     ro.hidden = false;
     const o = e.originalEvent;
     const w = ro.offsetWidth, hgt = ro.offsetHeight;
