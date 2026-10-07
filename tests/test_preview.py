@@ -845,12 +845,24 @@ def test_template_multi_variable_selection(tiny, tmp_path):
     assert "[...state.selected].reverse()" in html  # readout: top-most first
 
 
+def test_template_readout_samples_source_tiles(tiny, tmp_path):
+    # WebGLTileLayer.getData fails across jsdelivr +esm bundles (duplicate DataTile class):
+    # values are read from the sources' loaded tiles instead.
+    _, _, html = _generate(tiny, tmp_path)
+    assert "function sampleLayer" in html and "sampleLayer(" in html
+    assert ".getData(e.pixel)" not in html
+    assert "tileRepresentationCache" in html and "getTileCoordExtent" in html
+    assert "sampleSource" not in html and "getZForResolution" not in html
+    assert "bands > 1" in html and "alpha" in html  # nodata: last band is alpha, 0 -> no value
+
+
 def test_template_readout_latlon_line(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "ol@10.10.0/proj.js/+esm" in html and "toLonLat" in html
     assert "map.getView().getProjection()" in html  # transform from the view CRS
     assert "function coordLine" in html
-    assert "ro-coord" in html and "`lat ${" in html and "lon ${" in html
+    assert "ro-coord" in html and "`Lat: ${" in html and "  Lon: ${" in html
+    assert "`lat ${" not in html
     assert "normLon(" in html  # lon normalised for +-360 copies
 
 
