@@ -159,8 +159,12 @@
     font-variant-numeric: tabular-nums; }
   .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
   #sbfoot { padding: 12px 16px; border-top: 1px solid var(--card-line); }
-  #sbfoot label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
-  #lonrow { margin-top: 10px; }
+  #sbfoot label, #dimroles-title { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  #lonrow, #dimroles { margin-top: 10px; }
+  #dimroles label.dimrow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp);
+    margin-bottom: 4px; font-weight: 400; color: var(--text); }
+  #dimroles .dimname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sbfoot #dimroles select { width: 104px; flex: none; }
   #sbfoot input[type=number] { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px;
     border: 1px solid var(--card-line); background: transparent; color: inherit; font: inherit; }
   #sbfoot select { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px;
@@ -267,6 +271,10 @@
   <div id="sbfoot">
     <label for="basemap">Basemap</label>
     <select id="basemap"></select>
+    <div id="dimroles" hidden>
+      <span id="dimroles-title">Dimensions</span>
+      <div id="dimrows"></div>
+    </div>
     <div id="lonrow" hidden>
       <label for="centerlon">Centre longitude</label>
       <input id="centerlon" type="number" min="-180" max="180" step="10" value="0">
@@ -608,7 +616,7 @@ function colorExpr(v) {
 }
 
 // selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources}.
-const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, opacity: {}, vlayers: new window.Map(),
+const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, roles: {}, opacity: {}, vlayers: new window.Map(),
   map: null, scrub: null, scrubKey: null, timer: null, open: new Set(), hidden: new Set()};
 const varOf = (name) => cfg.variables.find((v) => v.name === name);
 const selVars = () => state.selected.map(varOf);
@@ -620,10 +628,16 @@ const unionDims = () => {
   return out;
 };
 
+// Slider assignment (D-40): each extra dim is the horizontal timeline ('h', at most one), a vertical
+// slider ('v') or off ('off': no slider, the index stays applied). Default: first dim 'h', the rest 'v'.
+const ROLES = [['h', 'Horizontal'], ['v', 'Vertical'], ['off', 'Off']];
+const defaultRoles = (dims) => Object.fromEntries(dims.map((d, i) => [d, i === 0 ? 'h' : 'v']));
+
 // ------------------------------------------------------------------ shareable URL
 // The URL mirrors the view: store, var (comma-separated), one parameter per dim of the selected
-// variables (ISO date for time-like dims, else index), cmap, rev, vmin, vmax, opacity (suffixed
-// `.<var>` with several variables), lon and the map view (x, y, z).
+// variables (ISO date for time-like dims, else index), `slider.<dim>` (h|v|off, only when it differs
+// from the default), cmap, rev, vmin, vmax, opacity (suffixed `.<var>` with several variables), lon
+// and the map view (x, y, z).
 // URL values win over remembered (localStorage) ones, so a shared link reproduces the view.
 const dimToParam = (d, i) => {
   const iso = cfg.dims[d].iso;
@@ -664,6 +678,8 @@ function styleParams(vars) {
     if (state.selected.includes(name)) state.hidden.add(name);
   }
   for (const d of Object.keys(cfg.dims)) {
+    const role = params.get(`slider.${d}`);
+    if (ROLES.some(([r]) => r === role)) state.roles[d] = role;
     const raw = params.get(d);
     if (raw === null) continue;
     const i = dimFromParam(d, raw);
@@ -700,7 +716,9 @@ function syncUrl() {
       q.set('var', state.selected.join(','));
       const hidden = state.selected.filter((name) => state.hidden.has(name));
       if (hidden.length) q.set('hidden', hidden.join(','));
-      for (const d of unionDims()) q.set(d, dimToParam(d, state.dims[d] || 0));
+      const dims = unionDims(), roles = defaultRoles(dims);
+      for (const d of dims) q.set(d, dimToParam(d, state.dims[d] || 0));
+      for (const d of dims) if (state.roles[d] && state.roles[d] !== roles[d]) q.set(`slider.${d}`, state.roles[d]);
       for (const [k, val] of styleParams(vars)) q.set(k, val);
     }
     if (cfg.global) q.set('lon', String(state.centerLon));
@@ -1139,24 +1157,65 @@ function setDim(name, i) {
   }
 }
 
+// Keep the role of every dim that has one; a new dim is horizontal only if no dim holds that role.
+function syncRoles(dimNames) {
+  let holder = dimNames.find((d) => state.roles[d] === 'h');
+  for (const d of dimNames) {
+    if (!state.roles[d]) state.roles[d] = holder === undefined ? 'h' : 'v';
+    if (state.roles[d] === 'h') { if (holder === undefined) holder = d; else if (holder !== d) state.roles[d] = 'v'; }
+  }
+}
+
+// Choosing Horizontal moves the previous holder to Vertical.
+function setRole(name, role) {
+  stopPlay();
+  if (role === 'h') for (const d of unionDims()) if (d !== name && state.roles[d] === 'h') state.roles[d] = 'v';
+  state.roles[name] = role;
+  syncUrl();
+  buildScrubber();
+  const sel = $('dimrows').children[unionDims().indexOf(name)]?.children[1];
+  if (sel && sel.focus) sel.focus();
+}
+
+function buildDimRoles(dimNames) {
+  const rows = $('dimrows');
+  rows.innerHTML = '';
+  $('dimroles').hidden = dimNames.length === 0;
+  for (const name of dimNames) {
+    const sel = h('select');
+    for (const [role, text] of ROLES) { const o = h('option', '', text); o.value = role; sel.append(o); }
+    sel.value = state.roles[name];
+    sel.addEventListener('change', () => setRole(name, sel.value));
+    const row = h('label', 'dimrow');
+    row.append(h('span', 'dimname', name), sel);
+    rows.append(row);
+  }
+}
+
 function buildScrubber() {
   stopPlay();
   state.scrub = null;
   const dimNames = unionDims();
   state.scrubKey = dimNames.join('\u0000');
+  syncRoles(dimNames);
   const bar = $('scrubber'), stack = $('dimstack');
   bar.innerHTML = ''; stack.innerHTML = '';
-  bar.hidden = dimNames.length === 0;
-  stack.hidden = dimNames.length < 2;
-  document.body.classList.toggle('has-scrub', dimNames.length > 0);
-  if (!dimNames.length) return;
+  const hDim = dimNames.find((d) => state.roles[d] === 'h');
+  const vDims = dimNames.filter((d) => state.roles[d] === 'v');
+  bar.hidden = !hDim;
+  stack.hidden = !vDims.length;
+  document.body.classList.toggle('has-scrub', !!hDim);
+  buildDimRoles(dimNames);
   for (const name of dimNames) {
     const size = cfg.dims[name].size;
     state.dims[name] = clamp(state.dims[name] || 0, 0, size - 1);
   }
+  if (hDim) buildTimeline(bar, hDim);
+  for (const name of vDims) buildDimSlider(stack, name);
+}
 
-  // main scrubber: first extra dim
-  const name = dimNames[0];
+// Horizontal timeline for one dim: play/step buttons, rail with ticks, draggable handle.
+function buildTimeline(bar, name) {
   const d = cfg.dims[name];
   const n = d.size;
   const {pos, timed, lo, hi} = stepPositions(d);
@@ -1248,20 +1307,20 @@ function buildScrubber() {
   state.scrub = {name, step, playBtn};
   render();
   layoutLabels();
+}
 
-  // further dims (e.g. depth): compact vertical sliders
-  for (const extra of dimNames.slice(1)) {
-    const ed = cfg.dims[extra];
-    const item = h('div', 'dim');
-    const val = h('span', 'val', String(dimLabel(ed, state.dims[extra])));
-    const inp = h('input');
-    inp.type = 'range'; inp.min = 0; inp.max = ed.size - 1; inp.step = 1; inp.value = state.dims[extra];
-    inp.setAttribute('orient', 'vertical');
-    inp.setAttribute('aria-label', extra);
-    inp.addEventListener('input', () => { setDim(extra, +inp.value); val.textContent = String(dimLabel(ed, +inp.value)); });
-    item.append(h('span', 'lab', extra), inp, val);
-    stack.append(item);
-  }
+// Compact vertical slider for one dim (e.g. depth).
+function buildDimSlider(stack, name) {
+  const ed = cfg.dims[name];
+  const item = h('div', 'dim');
+  const val = h('span', 'val', String(dimLabel(ed, state.dims[name])));
+  const inp = h('input');
+  inp.type = 'range'; inp.min = 0; inp.max = ed.size - 1; inp.step = 1; inp.value = state.dims[name];
+  inp.setAttribute('orient', 'vertical');
+  inp.setAttribute('aria-label', name);
+  inp.addEventListener('input', () => { setDim(name, +inp.value); val.textContent = String(dimLabel(ed, +inp.value)); });
+  item.append(h('span', 'lab', name), inp, val);
+  stack.append(item);
 }
 
 document.addEventListener('keydown', (e) => {
