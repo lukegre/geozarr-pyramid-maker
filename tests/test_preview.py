@@ -1365,6 +1365,44 @@ def test_viewer_selection_drag_behaviour():
     )
 
 
+def test_template_dimensions_block(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    foot = html.split('<div id="sbfoot">', 1)[1].split("</aside>", 1)[0]
+    assert (
+        foot.index('<select id="basemap">')
+        < foot.index('id="dimroles"')
+        < foot.index('id="lonrow"')
+    )
+    assert 'id="dimroles" hidden' in foot and 'id="dimrows"' in foot and "Dimensions" in foot
+    assert "['h', 'Horizontal'], ['v', 'Vertical'], ['off', 'Off']" in html
+    assert "q.set(`slider.${d}`, state.roles[d])" in html
+    assert "params.get(`slider.${d}`)" in html
+    assert "stack.hidden = !vDims.length" in html
+    assert "document.body.classList.toggle('has-scrub', !!hDim)" in html
+
+
+def test_viewer_slider_assignment_behaviour():
+    """Run the viewer's slider-role code: defaults, switching, Off, selection changes and URL."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_sliders.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_viewer_uses_array_names():
     html = pv.render_html(None)
     assert "top.append(handle, h('div', 'name', v.name))" in html
