@@ -1526,6 +1526,8 @@ function coordLine(map, coord, force) {
 // WebGLTileLayer.getData is not usable: with the jsdelivr +esm bundles the GeoZarr source's DataTile
 // is not the DataTile class WebGLTile checks with instanceof, and the source itself caches no tiles.
 // Edge tiles are smaller than the grid tile size, so pixels are addressed by resolution, not extent.
+// The renderer keeps tiles of earlier dimension slices (the source key changes with `dimensions`), so only
+// tiles whose `key` is the source's current key are used; until those are loaded there is no value (D-41).
 function sampleLayer(layer, source, coordinate) {
   const cache = layer.getRenderer?.()?.tileRepresentationCache;
   const grid = source.getTileGrid();
@@ -1534,7 +1536,7 @@ function sampleLayer(layer, source, coordinate) {
   let best = null;
   cache.forEach((rep) => {
     const tile = rep && rep.loaded && rep.tile;
-    if (!tile || tile.getState() !== 2) return;  // 2 = TileState.LOADED
+    if (!tile || tile.key !== source.getKey() || tile.getState() !== 2) return;  // 2 = TileState.LOADED
     const tc = tile.tileCoord;
     if (best && best.z >= tc[0]) return;
     const ext = grid.getTileCoordExtent(tc);

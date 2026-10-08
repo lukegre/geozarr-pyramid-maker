@@ -1365,6 +1365,28 @@ def test_viewer_selection_drag_behaviour():
     )
 
 
+def test_viewer_readout_follows_selected_slice():
+    """Run sampleLayer against a renderer cache that still holds tiles of earlier slices."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_readout.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_template_dimensions_block(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     foot = html.split('<div id="sbfoot">', 1)[1].split("</aside>", 1)[0]
