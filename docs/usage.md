@@ -53,6 +53,18 @@ Full examples on real data:
 [`examples/oceansoda_dfco2.py`](https://github.com/lukegre/geozarr-pyramid-maker/blob/main/examples/oceansoda_dfco2.py)
 and [`examples/demo.ipynb`](https://github.com/lukegre/geozarr-pyramid-maker/blob/main/examples/demo.ipynb).
 
+## Plot defaults
+
+Set `cmap`, `vmin` and `vmax` on a variable's attrs to control how the viewer first shows it:
+
+```python
+da.attrs.update(cmap="cmo.thermal", vmin=270, vmax=305)
+da.geozarr.to_pyramid("sst.zarr")
+```
+
+`cmap` accepts the viewer's colourmap names (`viridis`, `cmo.thermal`, `cmr.ember`, ...) and `viridis_r`-style names
+for the reversed map. See [Viewer](viewer.md#plot-defaults-from-attrs) for the rules.
+
 ## CLI
 
 ```bash

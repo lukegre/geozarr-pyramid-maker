@@ -341,6 +341,19 @@ function publicStoreUrl(src, endpoint) {
   if (!/^https?:$/.test(u.protocol)) throw storeError('Use an HTTP(S) GeoZarr URL.', '', 'unsupported_scheme');
   return u.href.replace(/\/$/, '');
 }
+// D-43 (mirrors preview._attr_limits): the vmin/vmax attrs override the computed limits; if both are given
+// and vmax <= vmin, both are ignored, otherwise vmax <= vmin becomes vmin + 1.
+const attrNum = (x) => typeof x === 'number' && Number.isFinite(x) ? x : null;
+function attrLimits(a, vmin, vmax, name) {
+  let lo = attrNum(a.vmin), hi = attrNum(a.vmax);
+  if (lo !== null && hi !== null && hi <= lo) {
+    console.warn(`${name}: vmax <= vmin in attrs (${lo} >= ${hi}), ignoring both`);
+    lo = hi = null;
+  }
+  if (lo !== null) vmin = lo;
+  if (hi !== null) vmax = hi;
+  return [vmin, vmax <= vmin ? vmin + 1 : vmax];
+}
 async function browserConfig(src, endpoint) {
   const url = publicStoreUrl(src, endpoint);
   const metadata = async (path) => {
@@ -381,11 +394,14 @@ async function browserConfig(src, endpoint) {
         const i = (values.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
         return values[lo] + (values[hi] - values[lo]) * (i - lo);
       };
-      const vmin = values.length ? (categorical ? values[0] : quantile(.02)) : 0;
+      let vmin = values.length ? (categorical ? values[0] : quantile(.02)) : 0;
       let vmax = values.length ? (categorical ? values.at(-1) : quantile(.98)) : 1;
       if (vmax <= vmin) vmax = vmin + 1;
+      // D-43: plot defaults from the attrs (categorical ignores them); `cmap` is resolved later, in defaultStyle.
+      if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);
       const v = {name, dims: extra, categorical, units: String(a.units || ''), long_name: String(a.long_name || ''),
         display_name: String(a.long_name || name), vmin, vmax, ticks: []};
+      if (!categorical && a.cmap != null) v.cmap = String(a.cmap);
       if (categorical) {
         v.values = [...new Set(values)].slice(0, 20);
         const palette = [[31,119,180],[255,127,14],[44,160,44],[214,39,40],[148,103,189],[140,86,75],[227,119,194],[127,127,127],[188,189,34],[23,190,207]];
@@ -623,7 +639,17 @@ function initCmapToggle() {
 }
 initCmapToggle();
 const styleKey = (v) => `gpm-preview:style:${cfg.title}:${v.name}`;
-const defaultStyle = (v) => ({cmap: 'viridis', reversed: false, vmin: v.vmin, vmax: v.vmax});
+// D-43: the variable's cmap (from the attrs): an exact key, else "<key>_r" = the key reversed, else viridis.
+// The server config already holds the resolved name; the in-browser loader passes the raw attr through.
+function resolveCmap(v) {
+  const name = v.cmap;
+  if (name == null) return {cmap: 'viridis', reversed: !!v.reversed};
+  if (cmaps[name]) return {cmap: name, reversed: !!v.reversed};
+  if (/_r$/.test(name) && cmaps[name.slice(0, -2)]) return {cmap: name.slice(0, -2), reversed: !v.reversed};
+  console.warn(`${v.name}: unknown cmap ${JSON.stringify(name)}, using viridis`);
+  return {cmap: 'viridis', reversed: !!v.reversed};
+}
+const defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax});
 const styles = {};
 function loadStyle(v) {
   try {
@@ -758,7 +784,7 @@ function styleParams(vars) {
     if (v.categorical) return;
     const st = {...styleOf(v)};
     const cm = get('cmap');
-    if (cm && cmaps[cm]) st.cmap = cm;
+    if (cm && cmaps[cm]) { st.cmap = cm; st.reversed = false; }  // the URL always writes `rev` when set, so absent = off
     const rv = get('rev');
     if (rv !== null) st.reversed = rv === '1';
     const lo = get('vmin'), hi = get('vmax');

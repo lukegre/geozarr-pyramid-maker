@@ -485,6 +485,150 @@ def test_colormaps_config(tiny, tmp_path):
     assert cfg["ramp"] == pv.RAMP  # kept for back-compat
 
 
+# ------------------------------------------------------------- plot defaults from attrs (D-43)
+
+
+def _attr_var(ds, tmp_path, **attrs):
+    ds = ds.copy(deep=True)
+    ds["t"].attrs.update(attrs)
+    [v] = pv.read_config(_pyramid(ds, tmp_path))["variables"]
+    return v
+
+
+def test_attr_defaults_unset(tiny, tmp_path):
+    v = _attr_var(tiny, tmp_path)
+    assert v["cmap"] == "viridis" and v["reversed"] is False
+    assert v["vmin"] < v["vmax"]
+
+
+@pytest.mark.parametrize(
+    ("attr", "expected"),
+    [
+        ("magma", ("magma", False)),
+        ("cmo.thermal", ("cmo.thermal", False)),
+        ("cmr.ember", ("cmr.ember", False)),
+        ("viridis_r", ("viridis", True)),
+        ("cmo.thermal_r", ("cmo.thermal", True)),
+        ("RdBu_r", ("RdBu_r", False)),  # legacy exact key wins over the _r rule
+        ("RdBu", ("RdBu", False)),
+    ],
+)
+def test_attr_cmap(tiny, tmp_path, attr, expected):
+    v = _attr_var(tiny, tmp_path, cmap=attr)
+    assert (v["cmap"], v["reversed"]) == expected
+    assert v["cmap"] in pv.COLORMAPS
+
+
+@pytest.mark.parametrize("bad", ["nonsense", "nonsense_r", 3, ""])
+def test_attr_cmap_unknown_warns(tiny, tmp_path, log_records, bad):
+    v = _attr_var(tiny, tmp_path, cmap=bad)
+    assert (v["cmap"], v["reversed"]) == ("viridis", False)
+    warnings_ = [m for lvl, m in log_records if lvl == "WARNING" and "cmap" in m]
+    assert warnings_ and repr(bad) in warnings_[0]
+
+
+def test_attr_limits_override(tiny, tmp_path):
+    base = _attr_var(tiny, tmp_path / "a")
+    only_min = _attr_var(tiny, tmp_path / "b", vmin=1000)
+    assert only_min["vmin"] == 1000.0 and only_min["vmax"] == base["vmax"]
+    only_max = _attr_var(tiny, tmp_path / "c", vmax=5000)
+    assert only_max["vmin"] == base["vmin"] and only_max["vmax"] == 5000.0
+    both = _attr_var(tiny, tmp_path / "d", vmin=np.float32(0.5), vmax=np.int64(20))
+    assert (both["vmin"], both["vmax"]) == (0.5, 20.0)
+    assert all(0.5 <= t <= 20 for t in both["ticks"]) and 4 <= len(both["ticks"]) <= 6
+
+
+def test_attr_limits_one_sided_inverted(tiny, tmp_path, log_records):
+    base = _attr_var(tiny, tmp_path / "a")
+    v = _attr_var(tiny, tmp_path / "b", vmin=base["vmax"] + 10)  # above the computed vmax
+    assert v["vmin"] == base["vmax"] + 10 and v["vmax"] == v["vmin"] + 1
+    assert not [m for lvl, m in log_records if lvl == "WARNING" and "vmax" in m]
+
+
+def test_attr_limits_both_inverted_ignored(tiny, tmp_path, log_records):
+    base = _attr_var(tiny, tmp_path / "a")
+    for i, (lo, hi) in enumerate([(10, 5), (7, 7)]):
+        v = _attr_var(tiny, tmp_path / f"b{i}", vmin=lo, vmax=hi)
+        assert (v["vmin"], v["vmax"]) == (base["vmin"], base["vmax"])
+    assert len([m for lvl, m in log_records if lvl == "WARNING" and "vmax" in m]) == 2
+
+
+def test_attr_limits_invalid_ignored(tiny, tmp_path):
+    base = _attr_var(tiny, tmp_path / "a")
+    for i, bad in enumerate([True, "5", float("nan"), None, [1, 2]]):
+        v = _attr_var(tiny, tmp_path / f"b{i}", vmin=bad, vmax=bad)
+        assert (v["vmin"], v["vmax"]) == (base["vmin"], base["vmax"]), bad
+
+
+def test_attr_helpers():
+    assert pv._attr_limits({"vmin": 1, "vmax": 2}, 0.0, 10.0) == (1.0, 2.0)
+    assert pv._attr_limits({"vmin": np.float32(0.5)}, 0.0, 10.0) == (0.5, 10.0)
+    assert pv._attr_limits({"vmin": True, "vmax": "3"}, 0.0, 10.0) == (0.0, 10.0)
+    assert pv._attr_cmap({"cmap": " viridis_r "}) == ("viridis", True)
+    assert pv._attr_cmap({}) == ("viridis", False)
+
+
+def test_attr_categorical_ignores(multi_var, tmp_path):
+    ds = multi_var.copy(deep=True)
+    ds["mask"].attrs.update(cmap="magma", vmin=-5, vmax=50)
+    ds["melt"].attrs.update(cmap="cmo.thermal_r", vmin=1, vmax=2)
+    by = {v["name"]: v for v in pv.read_config(_pyramid(ds, tmp_path))["variables"]}
+    mask = by["mask"]
+    assert mask["categorical"] and mask["cmap"] == "viridis" and mask["reversed"] is False
+    assert (mask["vmin"], mask["vmax"]) == (0.0, 2.0) and mask["ticks"] == []
+    assert (by["melt"]["cmap"], by["melt"]["reversed"]) == ("cmo.thermal", True)
+    assert (by["melt"]["vmin"], by["melt"]["vmax"]) == (1.0, 2.0)
+
+
+def test_attr_defaults_end_to_end_html(tiny, tmp_path):
+    ds = tiny.copy(deep=True)
+    ds["t"].attrs.update(cmap="cmo.thermal", vmin=270, vmax=np.float32(305.5))
+    html = gpm.preview(_pyramid(ds, tmp_path)).read_text()
+    [v] = _config(html)["variables"]
+    assert (v["cmap"], v["vmin"], v["vmax"]) == ("cmo.thermal", 270.0, 305.5)
+
+
+def test_attr_defaults_via_accessor(tiny, tmp_path):
+    da = tiny["t"].copy()
+    da.attrs.update(cmap="viridis_r", vmin=1, vmax=9)
+    store = tmp_path / "acc.zarr"
+    da.geozarr.to_pyramid(store, tile_size=32, validate=False)
+    [v] = pv.read_config(store)["variables"]
+    assert (v["cmap"], v["reversed"], v["vmin"], v["vmax"]) == ("viridis", True, 1.0, 9.0)
+
+
+def test_viewer_plot_defaults_behaviour():
+    """Run the viewer plot-default code: attr limits, cmap resolution, defaultStyle, precedence."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_plot_defaults.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+            str(root / "src/geozarr_pyramid_maker/colormaps.json"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_template_plot_defaults_hooks(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    # the in-browser loader (D-35) applies the attrs to non-categorical variables only
+    assert "if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);" in html
+    assert "if (!categorical && a.cmap != null) v.cmap = String(a.cmap);" in html
+    assert "defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax})" in html
+    assert "styles[v.name] = defaultStyle(v)" in html  # Reset returns to the attrs-based defaults
+
+
 def test_template_style_controls(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     for token in (
@@ -516,7 +660,9 @@ def test_diverging_colormap_direction(name, low_is_blue):
 
 def test_template_legend_ticks_and_default_not_reversed(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
-    assert "reversed: false" in html  # never reversed by default
+    assert (
+        "{cmap: 'viridis', reversed: !!v.reversed}" in html
+    )  # not reversed unless the config says so (D-43)
     assert "last && units" not in html  # units live in the card's metadata line only
     assert "function layoutTicks" in html
 

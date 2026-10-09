@@ -29,6 +29,21 @@ diverging, cyclic, miscellaneous), plus the **cmocean** and **cmasher** collecti
 colourmap in the list even when its group is hidden, and styles from a shared URL render with any map regardless of
 the checkboxes. The choice is remembered in the browser. With a colourmap menu focused, the left and right arrow keys step to the previous and next colourmap, handled explicitly by the viewer because browsers differ (hover the menu for a tip).
 
+## Plot defaults from attrs
+
+A variable can set how it first appears through its attrs, which `to_pyramid` stores on every level:
+
+```python
+da.attrs.update(cmap="cmo.thermal", vmin=270, vmax=305)
+da.geozarr.to_pyramid("sst.zarr")
+```
+
+`cmap` is any colourmap name from the list above (`viridis`, `cmo.thermal`, `cmr.ember`, ...); a matplotlib-style
+`_r` suffix such as `viridis_r` selects the map with **Reversed** switched on. `vmin` and `vmax` replace the default
+2-98 % percentile limits and can be set independently; if both are given and `vmax <= vmin`, both are ignored.
+Unknown colourmap names fall back to viridis with a warning, and categorical variables ignore all three attrs.
+Settings from the URL or stored in the browser take precedence, and **Reset** in a card's settings returns to the attrs.
+
 ## URL parameters
 
 | Parameter | Meaning |
