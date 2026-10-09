@@ -74,6 +74,6 @@ const v = {name: 'a', vmin: 270, vmax: 305, cmap: 'cmo.thermal', reversed: false
 context.v = v;
 assert.deepEqual({...run('loadStyle(v)')}, {cmap: 'cmo.thermal', reversed: false, vmin: 270, vmax: 305});
 kv.set('gpm-preview:style:t:a', JSON.stringify({cmap: 'magma', reversed: true, vmin: 1, vmax: 2}));
-assert.deepEqual({...run('loadStyle(v)')}, {cmap: 'magma', reversed: true, vmin: 1, vmax: 2});
+assert.deepEqual({...run('loadStyle(v)')}, {cmap: 'magma', reversed: true, vmin: 1, vmax: 2, log: false});  // D-54
 kv.set('gpm-preview:style:t:a', '{broken');
 assert.deepEqual({...run('loadStyle(v)')}, {cmap: 'cmo.thermal', reversed: false, vmin: 270, vmax: 305});

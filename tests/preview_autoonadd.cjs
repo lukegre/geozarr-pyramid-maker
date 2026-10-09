@@ -46,6 +46,7 @@ const context = vm.createContext({
   gradientCss: () => 'grad', buildLegend: () => fake('legend'), colorExpr: (v) => `expr:${v.name}`,
   syncUrl: () => { urlSyncs++; }, h: fake, varOf: (n) => variables.find((v) => v.name === n),
   cards: new Map(), autoOnAddHook: null,
+  effectiveLog: (s) => !!s.log && s.vmin > 0,  // D-54 stub (the real one is covered by preview_log.cjs)
 });
 const run = (code) => vm.runInContext(code, context);
 run('const cmaps = cfg.colormaps;');

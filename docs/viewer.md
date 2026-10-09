@@ -31,6 +31,11 @@ the range was set explicitly: by the URL (`vmin`, `vmax`, `cmap`, `rev`), a styl
 variable's `vmin`/`vmax` attrs or an edit on the card. That automatic range is not remembered, so it is redone each time
 the layer is added.
 
+**Log scale** (next to **Reversed**) spaces the colours logarithmically, for positive data spanning decades such as
+chlorophyll. It needs a positive Min (the box is disabled otherwise and the map stays linear), the legend then shows
+1-2-5 ticks on a log axis, Auto and Min/Max ignore values of zero or below, and Symmetric is disabled. It is kept in the
+browser and in shared URLs as `log=1`.
+
 With the page focused (or the timeline), the left and right arrow keys step the horizontal dimension and the up and
 down arrow keys step the first vertical dimension (up goes to the previous index, down to the next one). On a focused
 vertical slider, up and down step that slider and left and right step the timeline. Keys with a modifier are left to the
