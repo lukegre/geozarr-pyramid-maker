@@ -66,12 +66,14 @@ const context = vm.createContext({
 });
 context.state.map = {getLayers: () => collection};
 for (const name of ['labelOf', 'toggleVar', 'moveVariable', 'addVariable', 'removeVariable',
-  'clearDragFeedback', 'selectedDropBefore', 'initCardDragging', 'refreshCards', 'toggleVisibility', 'buildCards']) {
+  'restackLayers', 'clearDragFeedback', 'selectedDropBefore', 'initCardDragging', 'refreshCards', 'toggleVisibility', 'buildCards']) {
   vm.runInContext(source(name), context);
 }
-function order(expected) {
+function order(expected, hidden = []) {
   assert.deepEqual(Array.from(context.state.selected), expected);
-  assert.deepEqual(layers.map((l) => l.name), ['basemap', ...expected.flatMap((n) => [n, n, n])]);
+  // Hidden variables hold no layers.
+  assert.deepEqual(layers.map((l) => l.name),
+    ['basemap', ...expected.filter((n) => !hidden.includes(n)).flatMap((n) => [n, n, n])]);
   assert.deepEqual(elements['sel-cards'].children, expected.toReversed().map((n) => cards.get(n).el));
 }
 cards.clear();
@@ -90,18 +92,18 @@ assert.deepEqual(layers, original);
 const click = {stopPropagation() {}};
 cards.get('b').visibility.handlers.click(click);
 assert.equal(context.state.hidden.has('b'), true);
-assert.ok(layers.filter((l) => l.name === 'b').every((l) => !l.visible));
 assert.equal(cards.get('b').visibility.attributes['aria-label'], 'Show b');
-order(['a', 'b', 'c']);
+order(['a', 'b', 'c'], ['b']);
 cards.get('b').visibility.handlers.click(click);
 assert.equal(context.state.hidden.has('b'), false);
-assert.ok(layers.filter((l) => l.name === 'b').every((l) => l.visible));
+order(['a', 'b', 'c']); // Showing recreates the layers in place.
 assert.equal(cards.get('b').visibility.attributes['aria-label'], 'Hide b');
 assert.equal(elements['sec-other'].hidden, false); // Empty Other remains a drop target.
+const reused = layers.slice();
 context.moveVariable('a', true, 'c'); // Move bottom card to top.
 order(['b', 'c', 'a']);
-assert.equal(created, 3);
-assert.ok(layers.every((l) => original.includes(l))); // Reuse all layer/source groups.
+assert.equal(created, 4); // One extra group from hiding and showing b.
+assert.ok(layers.every((l) => reused.includes(l))); // Reordering reuses all layer/source groups.
 context.moveVariable('a', true); // Drop below all selected cards.
 order(['a', 'b', 'c']);
 context.toggleVisibility('b');
@@ -110,7 +112,7 @@ assert.equal(removeB.attributes['aria-label'], 'Remove b from Selected');
 removeB.handlers.click(click);
 assert.equal(context.state.hidden.has('b'), false);
 order(['a', 'c']);
-assert.ok(original.filter((l) => l.name === 'b').every((l) => l.disposed));
+assert.ok(reused.filter((l) => l.name === 'b').every((l) => l.disposed));
 context.initCardDragging();
 context.draggedVariable = 'c';
 let prevented = 0;
@@ -129,24 +131,22 @@ context.toggleVar('a');
 context.toggleVisibility('a'); // Hidden cards keep their order when dragged.
 context.draggedVariable = 'b';
 elements['sec-selected'].handlers.drop(event); // Add Other above the first card.
-order(['a', 'b']);
+order(['a', 'b'], ['a']);
 context.draggedVariable = 'a';
 elements['sec-selected'].handlers.drop(event); // Reorder via the actual drop handler.
-order(['b', 'a']);
-assert.ok(layers.filter((l) => l.name === 'a').every((l) => !l.visible));
+order(['b', 'a'], ['a']);
 elements['sec-selected'].handlers.dragover(event);
 elements['sec-selected'].handlers.dragleave({relatedTarget: null});
 assert.equal(elements['sec-selected'].classList.contains('drop-target'), false);
 context.draggedVariable = null;
 elements['sec-other'].handlers.drop(event); // Ignore unrelated external drops.
-order(['b', 'a']);
+order(['b', 'a'], ['a']);
 
 // The eye can hide the final visible layer without changing membership.
 context.moveVariable('b', false);
 context.toggleVisibility('a');
 context.toggleVisibility('a');
-order(['a']);
-assert.ok(layers.filter((l) => l.name === 'a').every((l) => !l.visible));
+order(['a'], ['a']);
 cards.get('a').el.children[0].children.at(-1).handlers.click(click);
 order([]);
 assert.equal(context.state.hidden.size, 0);

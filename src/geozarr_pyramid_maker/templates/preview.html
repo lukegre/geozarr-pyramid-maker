@@ -805,7 +805,8 @@ function colorExpr(v) {
   return expr;
 }
 
-// selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources}.
+// selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources},
+// only for variables that are selected and visible (hidden ones load nothing, D-52).
 const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, roles: {}, opacity: {}, vlayers: new window.Map(),
   map: null, scrub: null, vsteps: [], scrubKey: null, timer: null, open: new Set(), hidden: new Set()};
 const varOf = (name) => cfg.variables.find((v) => v.name === name);
@@ -1766,10 +1767,10 @@ function updateSpine() {
 }
 
 // Add or remove one variable's layer group; other variables' layers are left untouched.
+// A hidden variable gets no layers; the caller restacks after adding.
 function addVariable(name) {
-  const vl = makeLayers(varOf(name));
-  state.vlayers.set(name, vl);
-  for (const l of vl.layers) state.map.getLayers().push(l);  // above the existing data layers
+  if (state.hidden.has(name)) return;
+  state.vlayers.set(name, makeLayers(varOf(name)));
 }
 
 function removeVariable(name) {
@@ -1777,6 +1778,13 @@ function removeVariable(name) {
   if (!vl) return;
   for (const l of vl.layers) { state.map.getLayers().remove(l); l.dispose?.(); }
   state.vlayers.delete(name);
+}
+
+// Put the existing layers on the map in stacking order (hidden variables have none).
+function restackLayers() {
+  const layers = state.map.getLayers();
+  for (const n of state.selected) for (const layer of state.vlayers.get(n)?.layers || []) layers.remove(layer);
+  for (const n of state.selected) for (const layer of state.vlayers.get(n)?.layers || []) layers.push(layer);
 }
 
 function toggleVar(name) {
@@ -1788,8 +1796,14 @@ function toggleVar(name) {
 function toggleVisibility(name) {
   if (!state.selected.includes(name)) return;
   const visible = state.hidden.has(name);
-  if (visible) state.hidden.delete(name); else state.hidden.add(name);
-  for (const layer of state.vlayers.get(name)?.layers || []) layer.setVisible(visible);
+  if (visible) {
+    state.hidden.delete(name);
+    addVariable(name);
+    restackLayers();
+  } else {
+    state.hidden.add(name);
+    removeVariable(name);
+  }
   refreshCards();
   syncUrl();
   $('readout').hidden = true;
@@ -1810,13 +1824,7 @@ function moveVariable(name, selected, before = null) {
     state.selected = order.reverse();
     if (i < 0) addVariable(name);
     // Reuse existing layers (and their sources/styles) in the new stacking order.
-    const layers = state.map.getLayers();
-    for (const n of state.selected) {
-      for (const layer of state.vlayers.get(n).layers) layers.remove(layer);
-    }
-    for (const n of state.selected) {
-      for (const layer of state.vlayers.get(n).layers) layers.push(layer);
-    }
+    restackLayers();
   } else {
     state.hidden.delete(name);
     state.open.delete(name);
@@ -1974,16 +1982,13 @@ function init() {
   initCardDragging();
   refreshCards();
   buildScrubber();
-  for (const name of state.selected) {
-    const vl = makeLayers(varOf(name));
-    for (const layer of vl.layers) layer.setVisible(!state.hidden.has(name));
-    state.vlayers.set(name, vl);
-  }
-  const dataLayers = state.selected.flatMap((n) => state.vlayers.get(n).layers);
+  for (const name of state.selected) if (!state.hidden.has(name)) state.vlayers.set(name, makeLayers(varOf(name)));
+  const dataLayers = state.selected.flatMap((n) => state.vlayers.get(n)?.layers || []);
   // Pass a promise: Map's `view` option accepts Promise<ViewOptions> and resolves it. The resolved
   // options are adjusted for the centre longitude.
-  const detachedInitial = !state.selected.length;
-  const initial = state.vlayers.get(state.selected[0]) || makeLayers(cfg.variables[0]);
+  // With no visible layer, a temporary source supplies the view; it is disposed and never added to the map.
+  const detachedInitial = !state.vlayers.size;
+  const initial = state.vlayers.values().next().value || makeLayers(varOf(state.selected[0]) || cfg.variables[0]);
   const view = getView(initial.sources[0], withLowerResolutions(1), withHigherResolutions(2),
     withExtentCenter(), withZoom(2)).then(viewFor).finally(() => {
       if (detachedInitial) for (const layer of initial.layers) layer.dispose?.();
