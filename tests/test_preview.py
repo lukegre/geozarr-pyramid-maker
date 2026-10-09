@@ -542,11 +542,15 @@ def test_colormap_groups_data():
         "Diverging",
         "Cyclic",
         "Miscellaneous",
-        "cmocean",
-        "cmasher",
+        "cmocean: Sequential",
+        "cmocean: Diverging",
+        "cmocean: Cyclic",
+        "cmasher: Sequential",
+        "cmasher: Diverging",
+        "cmasher: Cyclic",
     ]
-    assert "Qualitative" not in labels
-    assert [g["source"] for g in groups] == ["core"] * 6 + ["cmocean", "cmasher"]
+    assert "Qualitative" not in labels and not any("Qualitative" in x for x in labels)
+    assert [g["source"] for g in groups] == ["core"] * 6 + ["cmocean"] * 3 + ["cmasher"] * 3
     listed = [n for g in groups for n in g["names"]]
     assert len(listed) == len(set(listed)) and set(listed) == set(pv.COLORMAPS)
     by_label = {g["label"]: g["names"] for g in groups}
@@ -563,6 +567,27 @@ def test_colormap_groups_data():
             assert (prefix is None and "." not in n) or (prefix and n.startswith(prefix)), n
     assert {"cmo.thermal", "cmo.balance", "cmr.ember", "cmr.ocean"} <= set(pv.COLORMAPS)
     assert "ocean" in by_label["Miscellaneous"] and "gray" in by_label["Sequential (2)"]
+
+
+def test_cmocean_cmasher_subgroups():
+    groups = pv.COLORMAP_GROUPS
+    by_label = {g["label"]: g["names"] for g in groups}
+    for g in groups:  # label and source agree for every group
+        if g["source"] == "core":
+            assert ":" not in g["label"], g["label"]
+        else:
+            assert g["label"].startswith(f"{g['source']}: "), g["label"]
+    for source, total in (("cmocean", 22), ("cmasher", 57)):
+        names = [n for g in groups if g["source"] == source for n in g["names"]]
+        assert len(names) == total == len(set(names))
+    assert "cmo.thermal" in by_label["cmocean: Sequential"]
+    assert "cmo.balance" in by_label["cmocean: Diverging"]
+    assert "cmo.topo" in by_label["cmocean: Diverging"]
+    assert by_label["cmocean: Cyclic"] == ["cmo.phase"]
+    assert "cmr.rainforest" in by_label["cmasher: Sequential"]
+    assert "cmr.fusion" in by_label["cmasher: Diverging"]
+    assert {"cmr.seasons", "cmr.seasons_s"} <= set(by_label["cmasher: Cyclic"])
+    assert "cmr.seasons_s" not in by_label["cmasher: Sequential"]
 
 
 def test_colormaps_are_11_rgb_stops():
@@ -628,6 +653,14 @@ def test_template_colormap_group_controls(tiny, tmp_path):
     # the vertical dim stack is back at its original offset
     assert "#dimstack { position: absolute; z-index: 4; right: var(--sp);" in html
     assert "bottom: calc(var(--scrub-h) + 44px);\n    display: flex; gap: var(--sp); }" in html
+
+
+def test_template_colormap_select_tooltip(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    tip = "Tip: with this menu focused, press ← / → to step to the previous / next colourmap."
+    assert f"sel.title = '{tip}';" in html
+    # native arrow-key stepping only: the select's single handler is the change event
+    assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html
 
 
 def test_viewer_colormap_groups_behaviour():
