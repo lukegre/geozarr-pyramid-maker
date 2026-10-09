@@ -607,8 +607,8 @@ const rgba = (c) => [c[0], c[1], c[2], 1];
 // Colourmaps: 11 RGB stops each, from the config (viridis-only `ramp` as a fallback).
 const cmaps = cfg.colormaps || {viridis: cfg.ramp};
 // Colourmap groups (D-42): each source (core = matplotlib, cmocean, cmasher) is listed only while its checkbox is on;
-// matplotlib defaults to on, the others to off (state kept in localStorage, in memory if that fails).
-// Looking a map up (`cmaps`) never depends on it.
+// matplotlib defaults to on, the others to off (state kept in localStorage, in memory if that fails). At least one
+// source always stays on (D-47). Looking a map up (`cmaps`) never depends on it.
 const CMAP_SHOW_KEYS = {core: 'gpm-preview:cmaps-matplotlib', cmocean: 'gpm-preview:cmaps-cmocean',
   cmasher: 'gpm-preview:cmaps-cmasher'};
 const CMAP_SHOW_BOX = {core: 'cmap-matplotlib', cmocean: 'cmap-cmocean', cmasher: 'cmap-cmasher'};
@@ -618,6 +618,7 @@ const cmapGroups = cfg.colormap_groups || [
   {label: 'Diverging', source: 'core', names: DIVERGING.filter((k) => cmaps[k])}];
 const cmapShow = Object.fromEntries(Object.entries(CMAP_SHOW_KEYS).map(([src, key]) =>
   [src, src === 'core' ? store.get(key) !== '0' : store.get(key) === '1']));
+if (!Object.values(cmapShow).some(Boolean)) cmapShow.core = true;  // stored state with no source on (not written back)
 const cmapFills = new Set();
 const cmapLabel = (name) => name.replace(/^cm[or]\./, '');
 function fillCmapSelect(sel, current) {
@@ -659,18 +660,31 @@ function reverseKey(rev, e) {
   e.stopPropagation();
   if (e.type === 'keydown' && !e.repeat) rev.click();
 }
+// Checkboxes mirror `cmapShow`; the only one still checked is disabled so the last source cannot be switched off.
+function syncCmapBoxes() {
+  const sources = Object.keys(CMAP_SHOW_KEYS);
+  const only = sources.filter((src) => cmapShow[src]).length === 1;
+  for (const source of sources) {
+    const box = $(CMAP_SHOW_BOX[source]);
+    box.checked = cmapShow[source];
+    box.disabled = only && cmapShow[source];
+    box.title = box.disabled ? 'At least one colourmap source must stay selected' : '';
+  }
+}
 function setCmapShow(source, on) {
+  if (!on && !Object.keys(cmapShow).some((src) => src !== source && cmapShow[src])) return syncCmapBoxes();
   cmapShow[source] = on;
   store.set(CMAP_SHOW_KEYS[source], on ? '1' : '0');
+  syncCmapBoxes();
   for (const fill of cmapFills) fill();
 }
 function initCmapToggle() {
   $('cmapmore').hidden = blank;
   for (const source of Object.keys(CMAP_SHOW_KEYS)) {
     const box = $(CMAP_SHOW_BOX[source]);
-    box.checked = cmapShow[source];
     box.addEventListener('change', () => setCmapShow(source, box.checked));
   }
+  syncCmapBoxes();
 }
 initCmapToggle();
 // Label mode (D-44): variables are shown by array name or, when it has one, by long name (the LaTeX-cleaned

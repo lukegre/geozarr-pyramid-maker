@@ -781,6 +781,8 @@ def test_template_colormap_group_controls(tiny, tmp_path):
         ">Colourmaps</span>",
         "function fillCmapSelect",
         "function setCmapShow",
+        "function syncCmapBoxes",
+        "At least one colourmap source must stay selected",
     ):
         assert token in html, token
     assert "More colourmaps" not in html
