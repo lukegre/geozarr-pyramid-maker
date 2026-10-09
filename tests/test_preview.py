@@ -1889,3 +1889,25 @@ def test_viewer_auto_range_behaviour():
         capture_output=True,
         text=True,
     )
+
+
+def test_viewer_scrubber_arrow_keys_behaviour():
+    """Run the viewer's arrow-key code: global and vertical-slider handlers across the scrubbers."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_scrub_keys.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )

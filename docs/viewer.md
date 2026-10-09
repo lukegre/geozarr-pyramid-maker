@@ -26,6 +26,11 @@ balanced, in which case a non-diverging colourmap is switched to RdBu reversed a
 for the current dimension slice, so the result can change with the viewport; with nothing loaded it leaves the range
 alone.
 
+With the page focused (or the timeline), the left and right arrow keys step the horizontal dimension and the up and
+down arrow keys step the first vertical dimension (up goes to the previous index, down to the next one). On a focused
+vertical slider, up and down step that slider and left and right step the timeline. Keys with a modifier are left to the
+browser.
+
 ## Global settings
 
 The block at the bottom of the sidebar starts with **Global settings**. **Label by** chooses how variables are named
