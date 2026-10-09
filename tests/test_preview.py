@@ -607,7 +607,7 @@ def test_template_colormap_group_controls(tiny, tmp_path):
         'id="cmap-matplotlib"',
         'id="cmap-cmocean"',
         'id="cmap-cmasher"',
-        "Colourmaps:",
+        ">Colourmaps</span>",
         "function fillCmapSelect",
         "function setCmapShow",
     ):
@@ -618,11 +618,16 @@ def test_template_colormap_group_controls(tiny, tmp_path):
     boxes = [html.index(f'id="cmap-{n}"') for n in ("matplotlib", "cmocean", "cmasher")]
     assert boxes == sorted(boxes)
     assert not any(f'id="cmap-{n}" checked' in html for n in ("matplotlib", "cmocean", "cmasher"))
-    assert "flex-wrap: wrap" in html.split("#cmapmore {")[1].split("}")[0]
-    # the control sits above the attribution and the vertical dim stack above the control
-    assert "#cmapmore {" in html and "bottom: calc(var(--scrub-h) + 36px)" in html
+    # the control lives in the sidebar footer, between the Dimensions and Centre longitude blocks
+    foot = html.split('<div id="sbfoot">', 1)[1].split("</aside>", 1)[0]
+    assert foot.index('id="dimroles"') < foot.index('id="cmapmore"') < foot.index('id="lonrow"')
+    cmapmore = foot.split('id="cmapmore"', 1)[1].split('id="lonrow"', 1)[0]
+    assert all(f'id="cmap-{n}"' in cmapmore for n in ("matplotlib", "cmocean", "cmasher"))
+    assert "#cmapmore { position" not in html and "max-width: calc(100vw - var(--sb-w)" not in html
+    assert "bottom: calc(var(--scrub-h) + 36px)" not in html
+    # the vertical dim stack is back at its original offset
     assert "#dimstack { position: absolute; z-index: 4; right: var(--sp);" in html
-    assert "bottom: calc(var(--scrub-h) + 70px)" in html
+    assert "bottom: calc(var(--scrub-h) + 44px);\n    display: flex; gap: var(--sp); }" in html
 
 
 def test_viewer_colormap_groups_behaviour():

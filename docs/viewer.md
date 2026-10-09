@@ -23,8 +23,8 @@ drop target even when it is empty or collapsed. Visibility is preserved in share
 
 The colourmap list in a card's settings is grouped like the matplotlib reference (perceptually uniform, sequential,
 diverging, cyclic, miscellaneous), plus the **cmocean** and **cmasher** collections (listed as `cmo.<name>` and
-`cmr.<name>` in the URL). Three checkboxes at the bottom right of the map, **matplotlib**, **cmocean** and **cmasher**,
-decide which of these are listed: matplotlib is on by default, the other two are off. A card keeps its current
+`cmr.<name>` in the URL). Three checkboxes in the sidebar footer under Dimensions, **matplotlib**, **cmocean** and
+**cmasher**, decide which of these are listed: matplotlib is on by default, the other two are off. A card keeps its current
 colourmap in the list even when its group is hidden, and styles from a shared URL render with any map regardless of
 the checkboxes. The choice is remembered in the browser.
 
