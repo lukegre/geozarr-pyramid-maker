@@ -20,7 +20,8 @@ function element(tag) {
     addEventListener(type, cb) { handlers[type] = cb; },
   };
 }
-const elements = {cmapmore: element('div'), 'cmap-cmocean': element('input'), 'cmap-cmasher': element('input')};
+const elements = {cmapmore: element('div'), 'cmap-matplotlib': element('input'), 'cmap-cmocean': element('input'),
+  'cmap-cmasher': element('input')};
 elements.cmapmore.hidden = true;
 const storage = new Map();
 const failing = {get: () => { throw new Error('denied'); }, set: () => { throw new Error('denied'); }};
@@ -36,16 +37,17 @@ function makeContext(extra = {}, kv = storage, blank = false) {
 }
 function load(context) {
   vm.runInContext('const cmaps = cfg.colormaps;', context);
-  vm.runInContext(between('const CMAP_EXTRA_KEYS', '\ninitCmapToggle();') + '\ninitCmapToggle();', context);
+  vm.runInContext(between('const CMAP_SHOW_KEYS', '\ninitCmapToggle();') + '\ninitCmapToggle();', context);
   return (code) => vm.runInContext(code, context);
 }
 const optionsOf = (sel) => sel.children.flatMap((og) => og.children.map((o) => [og.label, o.value, o.textContent]));
 const labelsOf = (sel) => sel.children.map((og) => og.label);
 const values = (sel) => optionsOf(sel).map((o) => o[1]);
 
-// Default: both checkboxes off, only the matplotlib groups are listed, control visible with a store.
+// Default: matplotlib on, cmocean and cmasher off, only the matplotlib groups are listed, control visible with a store.
 let run = load(makeContext());
 assert.equal(elements.cmapmore.hidden, false);
+assert.equal(elements['cmap-matplotlib'].checked, true);
 assert.equal(elements['cmap-cmocean'].checked, false);
 assert.equal(elements['cmap-cmasher'].checked, false);
 const sel = element('select');
@@ -59,6 +61,24 @@ assert.equal(sel.value, 'viridis');
 for (const name of ['bone', 'Spectral', 'berlin', 'managua', 'RdYlBu', 'twilight', 'twilight_shifted', 'gray', 'terrain']) {
   assert.ok(values(sel).includes(name), name);
 }
+
+// Unchecking matplotlib hides every core group but the card's current map; the lookup is unaffected.
+const mpl = element('select');
+run('cmapFills').add(() => run('fillCmapSelect')(mpl, 'viridis'));
+run('cmapFills').forEach((f) => f());
+elements['cmap-matplotlib'].checked = false;
+elements['cmap-matplotlib'].handlers.change();
+assert.equal(storage.get('gpm-preview:cmaps-matplotlib'), '0');
+assert.deepEqual(optionsOf(mpl), [['Perceptually uniform sequential', 'viridis', 'viridis']]);
+assert.equal(mpl.value, 'viridis');
+assert.ok(run('cmaps')['plasma'] && run('cmaps')['cmo.thermal']);
+run('fillCmapSelect')(sel, 'cmo.thermal');
+assert.deepEqual(optionsOf(sel), [['cmocean', 'cmo.thermal', 'thermal']]);
+elements['cmap-matplotlib'].checked = true;
+elements['cmap-matplotlib'].handlers.change();
+assert.equal(storage.get('gpm-preview:cmaps-matplotlib'), '1');
+assert.equal(labelsOf(mpl).length, 6);
+run('cmapFills').clear();
 
 // A card whose current map is in a hidden group keeps exactly that option, with the prefix stripped from the text.
 run('fillCmapSelect')(sel, 'cmo.thermal');
@@ -99,8 +119,20 @@ assert.equal(b.children.some((og) => og.label === 'cmasher'), false);
 run = load(makeContext({}, new Map([['gpm-preview:cmaps-cmocean', '1']])));
 assert.equal(elements['cmap-cmocean'].checked, true);
 assert.equal(elements['cmap-cmasher'].checked, false);
-run = load(makeContext({store: {get: () => null, set() { throw new Error('denied'); }}}));
+assert.equal(elements['cmap-matplotlib'].checked, true);  // nothing stored: matplotlib on
+run = load(makeContext({}, new Map([['gpm-preview:cmaps-matplotlib', '0']])));
+assert.equal(elements['cmap-matplotlib'].checked, false);
+run = load(makeContext({}, new Map([['gpm-preview:cmaps-matplotlib', '1']])));
+assert.equal(elements['cmap-matplotlib'].checked, true);
+// Storage failure (the real `store` swallows errors and returns null): defaults hold, state stays in memory.
+run = load(makeContext({store: {get: () => null, set() { /* swallowed like the real store */ }}}));
 assert.equal(elements['cmap-cmocean'].checked, false);
+assert.equal(elements['cmap-matplotlib'].checked, true);
+const mem = element('select');
+run('cmapFills').add(() => run('fillCmapSelect')(mem, 'viridis'));
+elements['cmap-matplotlib'].checked = false;
+elements['cmap-matplotlib'].handlers.change();
+assert.equal(optionsOf(mem).length, 1);
 
 // Blank viewer: no store, no control.
 load(makeContext({}, new Map(), true));
@@ -123,4 +155,9 @@ run = load(old);
 const fb = element('select');
 run('fillCmapSelect')(fb, 'viridis');
 assert.deepEqual(optionsOf(fb).map((o) => o.join(':')), ['Sequential:viridis:viridis', 'Diverging:RdBu_r:RdBu_r', 'Diverging:BrBG:BrBG']);
+// The fallback groups are core too: they follow the matplotlib checkbox and keep the current map.
+elements['cmap-matplotlib'].checked = false;
+elements['cmap-matplotlib'].handlers.change();
+run('fillCmapSelect')(fb, 'BrBG');
+assert.deepEqual(optionsOf(fb).map((o) => o.join(':')), ['Diverging:BrBG:BrBG']);
 console.log('ok');

@@ -207,9 +207,10 @@
   #dimstack .dim .val { font-variant-numeric: tabular-nums; }
   #dimstack input[type=range] { writing-mode: vertical-lr; width: 16px; height: 96px; margin: 0; }
 
-  /* extra colourmap groups (D-42): above the attribution, below the dim stack */
+  /* colourmap source toggles (D-42): above the attribution, below the dim stack */
   #cmapmore { position: absolute; z-index: 4; right: var(--sp); bottom: calc(var(--scrub-h) + 36px);
-    display: flex; align-items: center; gap: var(--sp); padding: 3px 10px; border-radius: var(--radius);
+    display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px var(--sp);
+    max-width: calc(100vw - var(--sb-w) - 2 * var(--sp)); padding: 3px 10px; border-radius: var(--radius);
     background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); font-size: 12px; }
   #cmapmore .cap { color: var(--muted); }
   #cmapmore label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -295,7 +296,8 @@
 <div id="scrubber" hidden></div>
 <div id="readout" hidden></div>
 <div id="cmapmore" hidden>
-  <span class="cap">More colourmaps:</span>
+  <span class="cap">Colourmaps:</span>
+  <label><input type="checkbox" id="cmap-matplotlib"><span>matplotlib</span></label>
   <label><input type="checkbox" id="cmap-cmocean"><span>cmocean</span></label>
   <label><input type="checkbox" id="cmap-cmasher"><span>cmasher</span></label>
 </div>
@@ -568,21 +570,25 @@ const rgba = (c) => [c[0], c[1], c[2], 1];
 
 // Colourmaps: 11 RGB stops each, from the config (viridis-only `ramp` as a fallback).
 const cmaps = cfg.colormaps || {viridis: cfg.ramp};
-// Colourmap groups (D-42): the matplotlib groups are always listed, cmocean and cmasher only while their
-// checkbox is on (state kept in localStorage, in memory if that fails). Looking a map up (`cmaps`) never depends on it.
-const CMAP_EXTRA_KEYS = {cmocean: 'gpm-preview:cmaps-cmocean', cmasher: 'gpm-preview:cmaps-cmasher'};
+// Colourmap groups (D-42): each source (core = matplotlib, cmocean, cmasher) is listed only while its checkbox is on;
+// matplotlib defaults to on, the others to off (state kept in localStorage, in memory if that fails).
+// Looking a map up (`cmaps`) never depends on it.
+const CMAP_SHOW_KEYS = {core: 'gpm-preview:cmaps-matplotlib', cmocean: 'gpm-preview:cmaps-cmocean',
+  cmasher: 'gpm-preview:cmaps-cmasher'};
+const CMAP_SHOW_BOX = {core: 'cmap-matplotlib', cmocean: 'cmap-cmocean', cmasher: 'cmap-cmasher'};
 const DIVERGING = ['RdBu_r', 'coolwarm', 'BrBG', 'PuOr'];  // fallback split for configs without colormap_groups
 const cmapGroups = cfg.colormap_groups || [
   {label: 'Sequential', source: 'core', names: Object.keys(cmaps).filter((k) => !DIVERGING.includes(k))},
   {label: 'Diverging', source: 'core', names: DIVERGING.filter((k) => cmaps[k])}];
-const cmapExtra = Object.fromEntries(Object.entries(CMAP_EXTRA_KEYS).map(([src, key]) => [src, store.get(key) === '1']));
+const cmapShow = Object.fromEntries(Object.entries(CMAP_SHOW_KEYS).map(([src, key]) =>
+  [src, src === 'core' ? store.get(key) !== '0' : store.get(key) === '1']));
 const cmapFills = new Set();
 const cmapLabel = (name) => name.replace(/^cm[or]\./, '');
 function fillCmapSelect(sel, current) {
   const groups = [];
   for (const g of cmapGroups) {
     // a hidden group still lists the card's current map, so the select never loses its value
-    const names = g.source === 'core' || cmapExtra[g.source] ? g.names : g.names.filter((n) => n === current);
+    const names = cmapShow[g.source] ? g.names : g.names.filter((n) => n === current);
     if (!names.length) continue;
     const og = document.createElement('optgroup');
     og.label = g.label;
@@ -592,17 +598,17 @@ function fillCmapSelect(sel, current) {
   sel.replaceChildren(...groups);
   sel.value = current;
 }
-function setCmapExtra(source, on) {
-  cmapExtra[source] = on;
-  store.set(CMAP_EXTRA_KEYS[source], on ? '1' : '0');
+function setCmapShow(source, on) {
+  cmapShow[source] = on;
+  store.set(CMAP_SHOW_KEYS[source], on ? '1' : '0');
   for (const fill of cmapFills) fill();
 }
 function initCmapToggle() {
   $('cmapmore').hidden = blank;
-  for (const source of Object.keys(CMAP_EXTRA_KEYS)) {
-    const box = $(`cmap-${source}`);
-    box.checked = cmapExtra[source];
-    box.addEventListener('change', () => setCmapExtra(source, box.checked));
+  for (const source of Object.keys(CMAP_SHOW_KEYS)) {
+    const box = $(CMAP_SHOW_BOX[source]);
+    box.checked = cmapShow[source];
+    box.addEventListener('change', () => setCmapShow(source, box.checked));
   }
 }
 initCmapToggle();
