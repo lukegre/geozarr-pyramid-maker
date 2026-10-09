@@ -1,4 +1,4 @@
-// Execute the viewer's real per-variable attributes popover (D-54) with a small DOM stand-in: the info button on
+// Execute the viewer's real per-variable attributes popover (D-55) with a small DOM stand-in: the info button on
 // every card, the table content, toggle/move/close behaviour and the browser-side attr formatting.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -50,7 +50,7 @@ const ctx = vm.createContext({
 });
 vm.runInContext(source('labelOf'), ctx);
 vm.runInContext(source('buildCards'), ctx);
-vm.runInContext(between('// D-54: attribute display values', '\nfunction initSidebar'), ctx);
+vm.runInContext(between('// D-55: attribute display values', '\nfunction initSidebar'), ctx);
 ctx.buildCards();
 ctx.initVarInfo();
 

@@ -581,6 +581,26 @@ def test_attr_categorical_ignores(multi_var, tmp_path):
     assert (by["melt"]["vmin"], by["melt"]["vmax"]) == (1.0, 2.0)
 
 
+def test_limits_from_attrs_flag(multi_var, tiny, tmp_path):
+    """D-53: the viewer skips the automatic Auto for variables whose limits come from the attrs."""
+
+    def flag(i, **attrs):
+        (tmp_path / str(i)).mkdir()
+        return _attr_var(tiny, tmp_path / str(i), **attrs)["limits_from_attrs"]
+
+    assert flag(0) is False
+    assert flag(1, vmin=1) is True
+    assert flag(2, vmax=9) is True
+    assert flag(3, vmin=1, vmax=9) is True
+    assert flag(4, cmap="magma") is False
+    assert flag(5, vmin=9, vmax=1) is False  # both given but inverted: both ignored (D-43)
+    ds = multi_var.copy(deep=True)
+    ds["mask"].attrs.update(vmin=-5, vmax=50)
+    by = {v["name"]: v for v in pv.read_config(_pyramid(ds, tmp_path))["variables"]}
+    assert by["mask"]["limits_from_attrs"] is False  # categorical: attrs ignored
+    assert by["melt"]["limits_from_attrs"] is False
+
+
 def test_attr_defaults_end_to_end_html(tiny, tmp_path):
     ds = tiny.copy(deep=True)
     ds["t"].attrs.update(cmap="cmo.thermal", vmin=270, vmax=np.float32(305.5))
@@ -627,6 +647,8 @@ def test_template_plot_defaults_hooks(tiny, tmp_path):
     assert "if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);" in html
     assert "if (!categorical && a.cmap != null) v.cmap = String(a.cmap);" in html
     assert "defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax})" in html
+    # D-53 marker, as preview.py
+    assert "limits_from_attrs: !categorical && hasAttrLimits(a)" in html
     assert "return defaultStyle(v);" in html  # initial style; the Reset button is gone (D-49)
     assert "styles[v.name] = defaultStyle(v)" not in html
 
@@ -1600,7 +1622,7 @@ def test_read_config_attrs_and_levels(tiny, tmp_path):
 
 
 def test_read_config_variable_attrs(tiny, tmp_path):
-    """D-54: each variable carries its array attrs as JSON-safe display values."""
+    """D-55: each variable carries its array attrs as JSON-safe display values."""
     ds = tiny.copy(deep=True)
     ds["t"].attrs.update(units="K", long_name="Temp", vmin=1.5, count=3, flags=[1, 2], ok=True)
     cfg = pv.read_config(_pyramid(ds, tmp_path))
@@ -1718,7 +1740,7 @@ def test_viewer_selection_drag_behaviour():
 
 
 def test_viewer_variable_info_popover():
-    """D-54: info button on every card, attrs table, toggle/move/close, browser attr formatting."""
+    """D-55: info button on every card, attrs table, toggle/move/close, browser attr formatting."""
     import shutil
     import subprocess
     from pathlib import Path
@@ -1933,7 +1955,7 @@ def test_template_range_row_and_auto_button(tiny, tmp_path):
     assert "btnRow.append(autoBtn, symBtn);" not in html
     # Min/Max button: true extent of the current frame, no colourmap change (D-51)
     assert "Set the range to the minimum and maximum of the current frame" in html
-    assert "const e = frameExtent(v.name);" in html
+    assert "const e = frameExtent(v.name, !!styleOf(v).log);" in html
     assert "minMaxRange(e.min, e.max)" in html
     assert "resetBtn" not in html
     assert "h('button', 'btn', 'Reset')" not in html
@@ -1941,7 +1963,7 @@ def test_template_range_row_and_auto_button(tiny, tmp_path):
     assert "styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;" in html
     assert "if (r.symmetric)" in html
     assert "a diverging colourmap (RdBu, reversed) is used" in html
-    assert "autoRange(frameValues(v.name))" in html
+    assert "autoRange(frameValues(v.name), !!styleOf(v).log)" in html
     assert "No loaded data for the current frame" in html
 
 
@@ -1960,6 +1982,40 @@ def test_viewer_auto_range_behaviour():
             node,
             str(root / "tests/preview_range.cjs"),
             str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_template_auto_on_add_hooks(tiny, tmp_path):
+    """D-53: added layers, and those drawn at load, get an automatic Auto after the first render."""
+    _, _, html = _generate(tiny, tmp_path)
+    assert "state.map.once('rendercomplete'" in html
+    assert "entry.auto = () => runAuto(true);" in html
+    assert "  autoOnAdd(name);" in html  # in addVariable, after the layers are created
+    # first draw: visible variables only
+    assert "state.selected.filter((n) => state.vlayers.has(n)).forEach(autoOnAdd);" in html
+    assert "const explicit = new Set();" in html
+
+
+def test_viewer_auto_on_add_behaviour():
+    """Run the automatic Auto: trigger, retries, explicit-range tracking, no persistence."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_autoonadd.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+            str(root / "src/geozarr_pyramid_maker/colormaps.json"),
         ],
         check=True,
         capture_output=True,
@@ -1987,3 +2043,41 @@ def test_viewer_scrubber_arrow_keys_behaviour():
         capture_output=True,
         text=True,
     )
+
+
+def test_viewer_log_scale_behaviour():
+    """Run the log-scale code: colour stops, effectiveLog, ticks, legend, persistence, URL."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_log.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+            str(root / "src/geozarr_pyramid_maker/colormaps.json"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_template_log_scale_controls(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "h('span', '', 'Log scale')" in html  # next to Reversed, in the same row
+    assert "Space the colours logarithmically (needs Min > 0)" in html
+    assert "function niceLogTicks" in html
+    assert "const effectiveLog" in html
+    assert "styleOf(v).log = logBox.checked" in html
+    assert "symBtn.disabled = effectiveLog(s)" in html
+    assert "autoRange(frameValues(v.name), !!styleOf(v).log)" in html
+    assert "frameExtent(v.name, !!styleOf(v).log)" in html
+    assert "cmap, rev, log, vmin, vmax" in html  # header comment lists the URL parameter
+    # the colourmap change keeps `log` (it only resets `reversed`)
+    assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html

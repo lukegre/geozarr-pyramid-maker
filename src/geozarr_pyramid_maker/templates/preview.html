@@ -101,7 +101,7 @@
     border-top: 1px solid var(--card-line); overflow-wrap: anywhere; }
   #infopanel th, #varinfo th { width: 32%; font-weight: 600; color: var(--muted); }
   #infopanel td, #varinfo td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
-  /* D-54: per-variable attributes popover, anchored beside the clicked card icon (placed in JS) */
+  /* D-55: per-variable attributes popover, anchored beside the clicked card icon (placed in JS) */
   #varinfo { right: auto; width: min(420px, calc(100vw - 2 * var(--sp))); }
   #varinfo .vtitle { margin: 0 0 6px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
   #varinfo .none { color: var(--muted); }
@@ -152,6 +152,8 @@
   .card .opts .sep { flex: none; }
   .card .opts .cmbar { flex: none; width: 56px; height: 10px; border-radius: 5px; }
   .card .opts .check { display: flex; align-items: center; gap: 6px; }
+  .card .opts .row.checks { flex-wrap: wrap; column-gap: 14px; }
+  .card .opts .row.checks > label { width: auto; }
   .card .opts .btn { flex: 1; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--card-line);
     background: transparent; color: var(--text); }
   .card .opts .btn:hover { background: var(--hover); }
@@ -383,6 +385,12 @@ function attrLimits(a, vmin, vmax, name) {
   if (hi !== null) vmax = hi;
   return [vmin, vmax <= vmin ? vmin + 1 : vmax];
 }
+// D-53 (mirrors preview._has_attr_limits): true when attrLimits takes a limit from the attrs.
+function hasAttrLimits(a) {
+  const lo = attrNum(a.vmin), hi = attrNum(a.vmax);
+  if (lo !== null && hi !== null && hi <= lo) return false;
+  return lo !== null || hi !== null;
+}
 async function browserConfig(src, endpoint) {
   const url = publicStoreUrl(src, endpoint);
   const metadata = async (path) => {
@@ -430,6 +438,7 @@ async function browserConfig(src, endpoint) {
       if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);
       const v = {name, dims: extra, categorical, units: String(a.units || ''), long_name: String(a.long_name || ''),
         display_name: String(a.long_name || name), vmin, vmax, ticks: [],
+        limits_from_attrs: !categorical && hasAttrLimits(a),
         attrs: Object.fromEntries(Object.entries(a).map(([k, x]) => [k, attrValue(x)]))};
       if (!categorical && a.cmap != null) v.cmap = String(a.cmap);
       if (categorical) {
@@ -704,7 +713,7 @@ function labelOf(v) {
   return labelMode === 'long' && v.long_name?.trim() ? (v.display_name || v.long_name) : v.name;
 }
 function applyLabels() {
-  closeVarInfo();  // D-54: its title is a label
+  closeVarInfo();  // D-55: its title is a label
   for (const [name, c] of cards) {
     const v = varOf(name);
     c.title.textContent = labelOf(v);
@@ -758,19 +767,25 @@ function resolveCmap(v) {
   return {cmap: 'viridis', reversed: !!v.reversed};
 }
 const defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax});
+// D-53: variables whose colour range was set explicitly (stored, from the URL or edited on the card). The automatic
+// Auto on add only runs for the others; the attrs limits (v.limits_from_attrs) count too.
+const explicit = new Set();
 const styles = {};
 function loadStyle(v) {
   try {
     const raw = store.get(styleKey(v));
     const s = raw ? JSON.parse(raw) : null;
     if (s && cmaps[s.cmap] && Number.isFinite(s.vmin) && Number.isFinite(s.vmax) && s.vmin < s.vmax) {
-      return {cmap: s.cmap, reversed: !!s.reversed, vmin: s.vmin, vmax: s.vmax};
+      explicit.add(v.name);
+      return {cmap: s.cmap, reversed: !!s.reversed, vmin: s.vmin, vmax: s.vmax, log: !!s.log};
     }
   } catch (_) { /* corrupt entry: use the defaults */ }
   return defaultStyle(v);
 }
 const styleOf = (v) => styles[v.name] || (styles[v.name] = loadStyle(v));
 const stopsOf = (st) => { const s = cmaps[st.cmap] || cfg.ramp; return st.reversed ? [...s].reverse() : s; };
+// D-54: the log scale needs a positive Min; the stored flag is kept while it is not.
+const effectiveLog = (st) => !!st.log && st.vmin > 0;
 const gradientCss = (stops) => 'linear-gradient(to right,' +
   stops.map((c, i) => `rgb(${c[0]},${c[1]},${c[2]}) ${100 * i / (stops.length - 1)}%`).join(',') + ')';
 
@@ -799,6 +814,25 @@ function niceTicks(vmin, vmax) {
   return best ? best.ticks : Array.from({length: 5}, (_, i) => clean(vmin + span * i / 4));
 }
 
+// Ticks of a log scale: 1-2-5 x 10^k inside [vmin, vmax], only 1 x 10^k when that gives more than 6, vmin and vmax
+// when fewer than 2 fit. Shared cases: (1, 10) -> 1,2,5,10    (3, 80) -> 5,10,20,50    (1, 1000) -> 1,10,100,1000
+function niceLogTicks(vmin, vmax) {
+  const clean = (x) => +Number(x).toPrecision(10);
+  const within = (mants) => {
+    const out = [];
+    for (let k = Math.floor(Math.log10(vmin)); k <= Math.ceil(Math.log10(vmax)); k++) {
+      for (const m of mants) {
+        const t = m * 10 ** k;
+        if (t >= vmin * (1 - 1e-9) && t <= vmax * (1 + 1e-9)) out.push(clean(t));
+      }
+    }
+    return out;
+  };
+  let ticks = within([1, 2, 5]);
+  if (ticks.length > 6) ticks = within([1]);
+  return ticks.length >= 2 ? ticks : [clean(vmin), clean(vmax)];
+}
+
 function colorExpr(v) {
   if (v.categorical) {
     const expr = ['match', ['band', 1]];
@@ -810,7 +844,11 @@ function colorExpr(v) {
   const stops = stopsOf(st);
   const expr = ['interpolate', ['linear'], ['band', 1]];
   const n = stops.length;
-  stops.forEach((c, i) => expr.push(st.vmin + (st.vmax - st.vmin) * i / (n - 1), rgba(c)));
+  // no log operator in OL expressions: the log scale puts the stops at geometric values instead (D-54)
+  const at = effectiveLog(st)
+    ? (f) => st.vmin * (st.vmax / st.vmin) ** f
+    : (f) => st.vmin + (st.vmax - st.vmin) * f;
+  stops.forEach((c, i) => expr.push(at(i / (n - 1)), rgba(c)));
   return expr;
 }
 
@@ -836,7 +874,7 @@ const defaultRoles = (dims) => Object.fromEntries(dims.map((d, i) => [d, i === 0
 // ------------------------------------------------------------------ shareable URL
 // The URL mirrors the view: store, var (comma-separated), one parameter per dim of the selected
 // variables (ISO date for time-like dims, else index), `slider.<dim>` (h|v|off, only when it differs
-// from the default), cmap, rev, vmin, vmax, opacity (suffixed `.<var>` with several variables), lon
+// from the default), cmap, rev, log, vmin, vmax, opacity (suffixed `.<var>` with several variables), lon
 // and the map view (x, y, z).
 // URL values win over remembered (localStorage) ones, so a shared link reproduces the view.
 const dimToParam = (d, i) => {
@@ -862,6 +900,7 @@ function styleParams(vars) {
       const st = styleOf(v);
       out.push([key('cmap'), st.cmap]);
       if (st.reversed) out.push([key('rev'), '1']);
+      if (st.log) out.push([key('log'), '1']);
       out.push([key('vmin'), String(+Number(st.vmin).toPrecision(6))]);
       out.push([key('vmax'), String(+Number(st.vmax).toPrecision(6))]);
     }
@@ -896,10 +935,15 @@ function styleParams(vars) {
     if (cm && cmaps[cm]) { st.cmap = cm; st.reversed = false; }  // the URL always writes `rev` when set, so absent = off
     const rv = get('rev');
     if (rv !== null) st.reversed = rv === '1';
+    const lg = get('log');
+    if (lg !== null) st.log = lg === '1';
     const lo = get('vmin'), hi = get('vmax');
     if (lo !== null && lo !== '' && Number.isFinite(Number(lo))) st.vmin = Number(lo);
     if (hi !== null && hi !== '' && Number.isFinite(Number(hi))) st.vmax = Number(hi);
-    if (st.vmin < st.vmax) styles[name] = st;
+    if (st.vmin < st.vmax) {
+      styles[name] = st;
+      if (['cmap', 'rev', 'vmin', 'vmax'].some((k) => get(k) !== null && get(k) !== '')) explicit.add(name);
+    }
   });
 })();
 
@@ -989,9 +1033,11 @@ function buildLegend(v) {
   const bar = h('div', 'bar');
   bar.style.background = gradientCss(stopsOf(st));
   const ticks = h('div', 'ticks');
-  const values = niceTicks(st.vmin, st.vmax);
+  const log = effectiveLog(st);
+  const values = log ? niceLogTicks(st.vmin, st.vmax) : niceTicks(st.vmin, st.vmax);
   values.forEach((t) => {
-    const p = clamp(100 * (t - st.vmin) / (st.vmax - st.vmin), 0, 100);
+    const f = log ? Math.log(t / st.vmin) / Math.log(st.vmax / st.vmin) : (t - st.vmin) / (st.vmax - st.vmin);
+    const p = clamp(100 * f, 0, 100);
     const mark = h('span', 'tick');
     mark.style.left = `${p}%`;
     const lab = h('span', 'tlabel', fmt(t));  // units are in the card's metadata line
@@ -1196,11 +1242,18 @@ function frameValues(name) {
   return out.subarray(0, n);
 }
 
-// {min, max} of every pixel of the loaded tiles of the current slice (D-51), or null without finite values.
+// {min, max} of every pixel of the loaded tiles of the current slice (D-51), or null without finite values (with
+// `positive`, without values > 0: the log scale of D-54 needs a positive range).
 // Streams over the tiles with stride 1 (no subsampling, no copy), so the true extremes are found.
-function frameExtent(name) {
+function frameExtent(name, positive) {
   let min = Infinity, max = -Infinity;
-  for (const t of frameTiles(name)) scanTile(t, 1, (val) => { if (val < min) min = val; if (val > max) max = val; });
+  for (const t of frameTiles(name)) {
+    scanTile(t, 1, (val) => {
+      if (positive && !(val > 0)) return;
+      if (val < min) min = val;
+      if (val > max) max = val;
+    });
+  }
   return min <= max ? {min, max} : null;
 }
 
@@ -1219,9 +1272,10 @@ function symmetricCmap(cmap, reversed) {
 
 // {vmin, vmax} from the 2nd and 98th percentiles (linear interpolation, as the default limits, D-43), or null
 // without finite values. Mirrored to [-m, m] when lo < 0 < hi and the smaller magnitude is at least half the
-// larger (`symmetric: true`); vmax = vmin + 1 when the range is empty.
-function autoRange(values) {
-  const v = Float64Array.from(Array.from(values).filter(Number.isFinite)).sort();
+// larger (`symmetric: true`); vmax = vmin + 1 when the range is empty. With `positive` (log scale, D-54) only
+// values > 0 count, so the range stays positive.
+function autoRange(values, positive) {
+  const v = Float64Array.from(Array.from(values).filter((x) => Number.isFinite(x) && (!positive || x > 0))).sort();
   if (!v.length) return null;
   const pct = (p) => {
     const x = p * (v.length - 1), i = Math.floor(x);
@@ -1258,7 +1312,13 @@ function buildStyleControls(v, opts, entry) {
   const rev = h('input');
   rev.type = 'checkbox';
   revLab.append(rev, h('span', '', 'Reversed'));
-  revRow.append(revLab);
+  const logLab = h('label', 'check');
+  const logBox = h('input');
+  logBox.type = 'checkbox';
+  logLab.title = 'Space the colours logarithmically (needs Min > 0)';
+  logLab.append(logBox, h('span', '', 'Log scale'));
+  revRow.classList.add('checks');
+  revRow.append(revLab, logLab);
   sel.addEventListener('keydown', (e) => reverseKey(rev, e));
   sel.addEventListener('keyup', (e) => reverseKey(rev, e));
   const minIn = h('input'), maxIn = h('input');
@@ -1278,16 +1338,21 @@ function buildStyleControls(v, opts, entry) {
     const s = styleOf(v);
     fill();
     rev.checked = s.reversed;
+    logBox.checked = !!s.log;
+    logBox.disabled = !(s.vmin > 0);  // the flag is kept, it just has no effect (D-54)
+    symBtn.disabled = effectiveLog(s);  // symmetric about 0 is meaningless on a log scale
     minIn.value = String(+s.vmin.toPrecision(6));
     maxIn.value = String(+s.vmax.toPrecision(6));
     cmBar.style.background = gradientCss(stopsOf(s));
   };
-  const apply = (clear) => {
+  // `auto`: the automatic Auto on add (D-53), neither stored nor marked explicit.
+  const apply = (clear, auto) => {
     const legend = buildLegend(v);
     entry.legend.replaceWith(legend);
     entry.legend = legend;
     sync();
-    if (clear) store.remove(styleKey(v)); else store.set(styleKey(v), JSON.stringify(styleOf(v)));
+    if (clear) { store.remove(styleKey(v)); explicit.delete(v.name); }
+    else if (!auto) { store.set(styleKey(v), JSON.stringify(styleOf(v))); explicit.add(v.name); }
     syncUrl();
     const vl = state.vlayers.get(v.name);
     if (vl) for (const l of vl.layers) l.setStyle({color: colorExpr(v)});
@@ -1308,25 +1373,30 @@ function buildStyleControls(v, opts, entry) {
   };
   sel.addEventListener('change', () => { styleOf(v).cmap = sel.value; styleOf(v).reversed = false; apply(false); });
   rev.addEventListener('change', () => { styleOf(v).reversed = rev.checked; apply(false); });
+  logBox.addEventListener('change', () => { styleOf(v).log = logBox.checked; apply(false); });
   minIn.addEventListener('change', setRange);
   maxIn.addEventListener('change', setRange);
-  autoBtn.addEventListener('click', () => {
-    const r = autoRange(frameValues(v.name));
-    if (!r) {  // nothing loaded for the current slice: keep the style
-      autoBtn.title = AUTO_NONE;
-      flashBad();
-      return;
-    }
-    autoBtn.title = AUTO_TITLE;
+  // Auto for the current frame; false (style kept) when nothing is loaded. The button is a user edit,
+  // entry.auto is the automatic run after a layer is added (D-53).
+  const runAuto = (auto) => {
+    const r = autoRange(frameValues(v.name), !!styleOf(v).log);
+    if (!r) return false;
     styleOf(v).vmin = r.vmin; styleOf(v).vmax = r.vmax;
     if (r.symmetric) {  // balanced signs: use a diverging colourmap unless the current one already is (D-49)
       const sym = symmetricCmap(styleOf(v).cmap, styleOf(v).reversed);
       styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;
     }
-    apply(false);
+    apply(false, auto);
+    return true;
+  };
+  entry.auto = () => runAuto(true);
+  autoBtn.addEventListener('click', () => {
+    if (runAuto(false)) { autoBtn.title = AUTO_TITLE; return; }
+    autoBtn.title = AUTO_NONE;  // nothing loaded for the current slice: keep the style
+    flashBad();
   });
   minMaxBtn.addEventListener('click', () => {  // true extent of the current frame; colourmap untouched (D-51)
-    const e = frameExtent(v.name);
+    const e = frameExtent(v.name, !!styleOf(v).log);
     const r = e && minMaxRange(e.min, e.max);
     if (!r) {
       minMaxBtn.title = AUTO_NONE;
@@ -1418,7 +1488,7 @@ function buildInfo() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) setOpen(false); });
 }
 
-// D-54: attribute display values, mirroring `_attr_value` in preview.py (the in-browser loader formats variable attrs with it).
+// D-55: attribute display values, mirroring `_attr_value` in preview.py (the in-browser loader formats variable attrs with it).
 function attrValue(x) {
   let out;
   if (typeof x === 'boolean') out = x ? 'True' : 'False';
@@ -1430,7 +1500,7 @@ function attrValue(x) {
   return typeof out === 'string' && out.length > 2000 ? out.slice(0, 2000) + '\u2026' : out;
 }
 
-// D-54: one shared popover (#varinfo) lists a variable's array attrs next to the clicked card icon.
+// D-55: one shared popover (#varinfo) lists a variable's array attrs next to the clicked card icon.
 let varInfoFor = null, varInfoBtn = null;
 function closeVarInfo() {
   $('varinfo').hidden = true;
@@ -1834,11 +1904,28 @@ function updateSpine() {
   $('sbspine').title = `${cfg.source || cfg.title} · ${names}`;
 }
 
+// Auto range on add (D-53): once the map has rendered the new layer, run the card's Auto, unless the range was set
+// explicitly (stored, URL, attrs, edited) or the variable is categorical. An empty render (no tiles in view yet) is
+// retried on the next two; a variable removed, hidden or edited meanwhile is skipped.
+const autoPending = new Set();
+function autoOnAdd(name) {
+  const v = varOf(name);
+  if (v.categorical || v.limits_from_attrs || explicit.has(name) || autoPending.has(name)) return;
+  autoPending.add(name);
+  const attempt = (left) => state.map.once('rendercomplete', () => {
+    const live = state.selected.includes(name) && !state.hidden.has(name) && !explicit.has(name);
+    if (live && !cards.get(name).auto() && left > 1) return attempt(left - 1);
+    autoPending.delete(name);
+  });
+  attempt(3);
+}
+
 // Add or remove one variable's layer group; other variables' layers are left untouched.
 // A hidden variable gets no layers; the caller restacks after adding.
 function addVariable(name) {
   if (state.hidden.has(name)) return;
   state.vlayers.set(name, makeLayers(varOf(name)));
+  autoOnAdd(name);  // runs once the caller's restack has put the layers on the map and they rendered
 }
 
 function removeVariable(name) {
@@ -2066,6 +2153,7 @@ function init() {
   state.map = new Map({target: 'map', layers: [...basemaps, ...dataLayers], view});
   initReadout(state.map);
   state.map.on('moveend', syncUrl);
+  state.selected.filter((n) => state.vlayers.has(n)).forEach(autoOnAdd);  // visible variables only (D-53)
   syncUrl();
   initCenterLon();
 }
