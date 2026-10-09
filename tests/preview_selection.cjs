@@ -51,7 +51,7 @@ variables[1].display_name = 'Readable B';
 let created = 0;
 const context = vm.createContext({
   state: {selected: [], vlayers: new Map(), open: new Set(), hidden: new Set(), scrubKey: ''},
-  cfg: {variables}, cards, ICON: {eye: 'eye', eyeOff: 'eyeOff', gear: 'gear'}, otherCollapsed: true, draggedVariable: null,
+  labelMode: 'name', cfg: {variables}, cards, ICON: {eye: 'eye', eyeOff: 'eyeOff', gear: 'gear'}, otherCollapsed: true, draggedVariable: null,
   $: (id) => elements[id], varOf: (name) => variables.find((v) => v.name === name),
   makeLayers: (v) => {
     created++;
@@ -65,7 +65,7 @@ const context = vm.createContext({
   stopPlay() {}, syncUrl() {}, updateSpine() {}, buildScrubber() {}, unionDims: () => [],
 });
 context.state.map = {getLayers: () => collection};
-for (const name of ['toggleVar', 'moveVariable', 'addVariable', 'removeVariable',
+for (const name of ['labelOf', 'toggleVar', 'moveVariable', 'addVariable', 'removeVariable',
   'clearDragFeedback', 'selectedDropBefore', 'initCardDragging', 'refreshCards', 'toggleVisibility', 'buildCards']) {
   vm.runInContext(source(name), context);
 }

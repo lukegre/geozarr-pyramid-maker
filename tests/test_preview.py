@@ -803,8 +803,18 @@ def test_template_colormap_group_controls(tiny, tmp_path):
 
 def test_template_colormap_select_tooltip(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
-    tip = "Tip: with this menu focused, press ← / → to step to the previous / next colourmap."
+    tip = (
+        "Tip: with this menu focused, press ← / → to step to the previous / next colourmap, "
+        "or Space to toggle Reversed."
+    )
     assert f"sel.title = '{tip}';" in html
+    # Space clicks the card's Reversed checkbox (same change path), keyup swallowed too
+    assert "sel.addEventListener('keydown', (e) => reverseKey(rev, e));" in html
+    assert "sel.addEventListener('keyup', (e) => reverseKey(rev, e));" in html
+    assert (
+        "rev.click()"
+        in html.split("function reverseKey(rev, e) {", 1)[1].split("\nfunction ", 1)[0]
+    )
     # explicit ←/→ stepping (native is unreliable): keydown -> stepSelect -> bubbling change
     assert "sel.addEventListener('keydown', (e) => stepSelect(sel, e));" in html
     step = html.split("function stepSelect(sel, e) {", 1)[1].split("\nfunction setCmapShow", 1)[0]
@@ -1739,11 +1749,56 @@ def test_viewer_slider_assignment_behaviour():
     )
 
 
+def test_viewer_label_mode_behaviour():
+    """Run labelOf, its persistence and the in-place relabelling of every name label."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_labels.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_template_global_settings_footer(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    foot = html.split('<div id="sbfoot">', 1)[1].split("</aside>", 1)[0]
+    assert foot.lstrip().startswith('<div id="gs-title">Global settings</div>')
+    assert (
+        foot.index("Global settings")
+        < foot.index('id="labelrow"')
+        < foot.index('<label for="basemap">')
+    )
+    labelrow = foot.split('id="labelrow"', 1)[1].split('<label for="basemap">', 1)[0]
+    assert '<label for="labelmode">Label by</label>' in labelrow
+    assert '<select id="labelmode">' in labelrow
+    assert '<option value="name">Array name</option>' in labelrow
+    assert '<option value="long">Long name</option>' in labelrow
+    assert "const LABEL_KEY = 'gpm-preview:label-mode';" in html
+    assert "#gs-title" in html
+    assert "initLabelMode();" in html.split("function init() {", 1)[1]
+    # every place that shows a variable name goes through labelOf
+    assert "lines.push(`${labelOf(v)}:" in html
+    assert "selVars().map((v) => labelOf(v)).join(', ')" in html
+    assert "'info-vars'" in html
+
+
 def test_viewer_uses_array_names():
     html = pv.render_html(None)
-    assert "top.append(handle, h('div', 'name', v.name))" in html
+    assert "const title = h('div', 'name', labelOf(v));" in html
     assert "v.display_name || v.name" not in html
-    assert "if (v.long_name?.trim()) opts.append" in html
+    assert "const longname = v.long_name?.trim()" in html
     assert "v.display_name || v.long_name" in html
     assert ".card.selected.open .opts" in html
     assert "params.get('var') === ''" in html

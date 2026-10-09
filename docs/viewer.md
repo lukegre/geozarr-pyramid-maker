@@ -13,11 +13,19 @@ The page loads its JavaScript dependencies and basemap tiles from the internet.
 
 The sidebar lists the variables in two sections. **Selected (n)** holds the variables currently shown, top-most layer
 first; **Other (n)** holds the rest in dataset order and can be collapsed with its header (the choice is remembered in
-the browser). Cards show the array names. Clicking an Other card adds it to Selected; clicking a selected card keeps
+the browser). Cards show the array names (or the long names, see Global settings below). Clicking an Other card adds it to Selected; clicking a selected card keeps
 it selected. The eye icon shows or hides its map layer while keeping the card in Selected; the × icon removes it
-to Other. Expand settings to see the long name when available. Drag a card by its handle to reorder Selected or move
+to Other. Expand settings to see the long name when available (the array name when labels are by long name). Drag a card by its handle to reorder Selected or move
 it between sections. The map follows the selected card order. All cards can be removed. Other remains visible as a
 drop target even when it is empty or collapsed. Visibility is preserved in shared URLs with `hidden=a,b`.
+
+## Global settings
+
+The block at the bottom of the sidebar starts with **Global settings**. **Label by** chooses how variables are named
+everywhere (cards, the collapsed sidebar, the pointer readout and the info panel): **Array name** (default) or **Long
+name**, which falls back to the array name for variables without a `long_name`. It switches in place and is remembered
+in the browser, not in the URL. It is hidden while no store is loaded. Basemap, Dimensions, Colourmaps and Centre
+longitude follow.
 
 ## Colourmaps
 
@@ -27,7 +35,7 @@ diverging, cyclic, miscellaneous), plus the **cmocean** and **cmasher** collecti
 `cmocean: Diverging`). Three checkboxes in the sidebar footer under Dimensions, **matplotlib**, **cmocean** and
 **cmasher**, decide which of these are listed: matplotlib is on by default, the other two are off. A card keeps its current
 colourmap in the list even when its group is hidden, and styles from a shared URL render with any map regardless of
-the checkboxes. The choice is remembered in the browser. With a colourmap menu focused, the left and right arrow keys step to the previous and next colourmap, handled explicitly by the viewer because browsers differ (hover the menu for a tip).
+the checkboxes. The choice is remembered in the browser. With a colourmap menu focused, the left and right arrow keys step to the previous and next colourmap, handled explicitly by the viewer because browsers differ (hover the menu for a tip). Space toggles **Reversed** for that card (when the dropdown list is already open, Space selects the highlighted option, as in the browser).
 
 ## Plot defaults from attrs
 
