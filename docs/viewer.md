@@ -27,6 +27,9 @@ name**, which falls back to the array name for variables without a `long_name`. 
 in the browser, not in the URL. It is hidden while no store is loaded. Basemap, Dimensions, Colourmaps and Centre
 longitude follow.
 
+Click the **Global settings** heading (cog icon and chevron) to collapse the block and give the cards more room; it is
+expanded by default, and the choice is remembered in the browser, not in the URL. Errors and notes stay visible when collapsed.
+
 ## Colourmaps
 
 The colourmap list in a card's settings is grouped like the matplotlib reference (perceptually uniform, sequential,
