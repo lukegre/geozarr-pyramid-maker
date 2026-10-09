@@ -73,7 +73,7 @@ assert.deepEqual(optionsOf(mpl), [['Perceptually uniform sequential', 'viridis',
 assert.equal(mpl.value, 'viridis');
 assert.ok(run('cmaps')['plasma'] && run('cmaps')['cmo.thermal']);
 run('fillCmapSelect')(sel, 'cmo.thermal');
-assert.deepEqual(optionsOf(sel), [['cmocean', 'cmo.thermal', 'thermal']]);
+assert.deepEqual(optionsOf(sel), [['cmocean: Sequential', 'cmo.thermal', 'thermal']]);
 elements['cmap-matplotlib'].checked = true;
 elements['cmap-matplotlib'].handlers.change();
 assert.equal(storage.get('gpm-preview:cmaps-matplotlib'), '1');
@@ -83,8 +83,14 @@ run('cmapFills').clear();
 // A card whose current map is in a hidden group keeps exactly that option, with the prefix stripped from the text.
 run('fillCmapSelect')(sel, 'cmo.thermal');
 assert.equal(sel.value, 'cmo.thermal');
-assert.deepEqual(optionsOf(sel).filter((o) => o[0] === 'cmocean'), [['cmocean', 'cmo.thermal', 'thermal']]);
-assert.equal(labelsOf(sel).includes('cmasher'), false);
+assert.deepEqual(optionsOf(sel).filter((o) => o[0].startsWith('cmocean')), [['cmocean: Sequential', 'cmo.thermal', 'thermal']]);
+assert.equal(labelsOf(sel).some((l) => l.startsWith('cmasher')), false);
+// Another subgroup of the same hidden source keeps only its own current map under its own label.
+run('fillCmapSelect')(sel, 'cmo.balance');
+assert.deepEqual(optionsOf(sel).filter((o) => /^cm[or]\./.test(o[1])), [['cmocean: Diverging', 'cmo.balance', 'balance']]);
+assert.equal(sel.value, 'cmo.balance');
+run('fillCmapSelect')(sel, 'cmr.seasons_s');
+assert.deepEqual(optionsOf(sel).filter((o) => /^cm[or]\./.test(o[1])), [['cmasher: Cyclic', 'cmr.seasons_s', 'seasons_s']]);
 
 // Toggling rebuilds every registered select and keeps each current value.
 const a = element('select'), b = element('select');
@@ -92,28 +98,36 @@ const cur = {a: 'cmr.ember', b: 'viridis'};
 run('cmapFills').add(() => run('fillCmapSelect')(a, cur.a));
 run('cmapFills').add(() => run('fillCmapSelect')(b, cur.b));
 run('cmapFills').forEach((f) => f());
-assert.deepEqual(optionsOf(a).filter((o) => o[0] === 'cmasher'), [['cmasher', 'cmr.ember', 'ember']]);
+const isGroupOf = (source) => (o) => o[0].startsWith(source + ':');
+assert.deepEqual(optionsOf(a).filter(isGroupOf('cmasher')), [['cmasher: Sequential', 'cmr.ember', 'ember']]);
 elements['cmap-cmasher'].checked = true;
 elements['cmap-cmasher'].handlers.change();
 assert.equal(storage.get('gpm-preview:cmaps-cmasher'), '1');
 assert.equal(storage.has('gpm-preview:cmaps-cmocean'), false);
-const cmasher = data.groups.find((g) => g.source === 'cmasher').names;
-assert.deepEqual(a.children.find((og) => og.label === 'cmasher').children.map((o) => o.value), cmasher);
+const cmasherGroups = data.groups.filter((g) => g.source === 'cmasher');
+const cmasher = cmasherGroups.flatMap((g) => g.names);
+assert.deepEqual(cmasherGroups.map((g) => g.label), ['cmasher: Sequential', 'cmasher: Diverging', 'cmasher: Cyclic']);
+assert.equal(cmasher.length, 57);
+assert.equal(data.groups.filter((g) => g.source === 'cmocean').flatMap((g) => g.names).length, 22);
+assert.deepEqual(labelsOf(a).filter((l) => l.startsWith('cmasher')), cmasherGroups.map((g) => g.label));
+assert.deepEqual(values(a).filter((v) => v.startsWith('cmr.')), cmasher);
 assert.equal(a.value, 'cmr.ember');
-assert.ok(b.children.some((og) => og.label === 'cmasher') && !b.children.some((og) => og.label === 'cmocean'));
-assert.equal(b.children.find((og) => og.label === 'cmasher').children[0].textContent, cmasher[0].slice(4));
+assert.ok(labelsOf(b).some((l) => l.startsWith('cmasher')) && !labelsOf(b).some((l) => l.startsWith('cmocean')));
+assert.equal(b.children.find((og) => og.label === 'cmasher: Sequential').children[0].textContent, cmasher[0].slice(4));
+assert.equal(b.children.find((og) => og.label === 'cmasher: Cyclic').children.at(-1).textContent, 'seasons_s');
 elements['cmap-cmocean'].checked = true;
 elements['cmap-cmocean'].handlers.change();
 assert.equal(storage.get('gpm-preview:cmaps-cmocean'), '1');
-assert.deepEqual(labelsOf(b).slice(-2), ['cmocean', 'cmasher']);
+assert.deepEqual(labelsOf(b).slice(-6), ['cmocean: Sequential', 'cmocean: Diverging', 'cmocean: Cyclic',
+  'cmasher: Sequential', 'cmasher: Diverging', 'cmasher: Cyclic']);
 assert.equal(b.value, 'viridis');
 
 // Switching off again: the card keeps its current map, the others disappear.
 elements['cmap-cmasher'].checked = false;
 elements['cmap-cmasher'].handlers.change();
 assert.equal(storage.get('gpm-preview:cmaps-cmasher'), '0');
-assert.deepEqual(optionsOf(a).filter((o) => o[0] === 'cmasher').map((o) => o[1]), ['cmr.ember']);
-assert.equal(b.children.some((og) => og.label === 'cmasher'), false);
+assert.deepEqual(optionsOf(a).filter(isGroupOf('cmasher')).map((o) => o[1]), ['cmr.ember']);
+assert.equal(labelsOf(b).some((l) => l.startsWith('cmasher')), false);
 
 // Persisted state is restored on load; storage failures fall back to memory.
 run = load(makeContext({}, new Map([['gpm-preview:cmaps-cmocean', '1']])));
