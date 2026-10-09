@@ -26,6 +26,10 @@ balanced, in which case a non-diverging colourmap is switched to RdBu reversed a
 the colourmap is left alone) and **Symmetric** mirrors the current limits. Auto and Min/Max use the tiles loaded
 for the current dimension slice, so the result can change with the viewport; with nothing loaded they leave the range
 alone.
+When a layer is added (also those drawn when the page opens), Auto runs by itself once the map has rendered it, unless
+the range was set explicitly: by the URL (`vmin`, `vmax`, `cmap`, `rev`), a style remembered in the browser, the
+variable's `vmin`/`vmax` attrs or an edit on the card. That automatic range is not remembered, so it is redone each time
+the layer is added.
 
 With the page focused (or the timeline), the left and right arrow keys step the horizontal dimension and the up and
 down arrow keys step the first vertical dimension (up goes to the previous index, down to the next one). On a focused

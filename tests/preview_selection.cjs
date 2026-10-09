@@ -49,6 +49,7 @@ variables[0].long_name = '';
 variables[1].long_name = 'Long B';
 variables[1].display_name = 'Readable B';
 let created = 0;
+const added = [];
 const context = vm.createContext({
   state: {selected: [], vlayers: new Map(), open: new Set(), hidden: new Set(), scrubKey: ''},
   labelMode: 'name', cfg: {variables}, cards, ICON: {eye: 'eye', eyeOff: 'eyeOff', gear: 'gear'}, otherCollapsed: true, draggedVariable: null,
@@ -62,6 +63,7 @@ const context = vm.createContext({
   },
   h(tag, cls, text) { const el = element(); el.tag = tag; el.className = cls; el.textContent = text; return el; },
   unitsOf: () => '', opacityOf: () => 1, buildLegend: () => element(),
+  autoOnAdd: (name) => added.push(name),  // D-52: runs for a newly added layer only
   stopPlay() {}, syncUrl() {}, updateSpine() {}, buildScrubber() {}, unionDims: () => [],
 });
 context.state.map = {getLayers: () => collection};
@@ -83,9 +85,11 @@ context.toggleVar('a');
 context.toggleVar('b');
 context.toggleVar('c');
 order(['a', 'b', 'c']);
+assert.deepEqual(added, ['a', 'b', 'c']);
 const original = layers.slice();
 context.toggleVar('b'); // A selected card stays selected and does not move.
 order(['a', 'b', 'c']);
+assert.deepEqual(added, ['a', 'b', 'c']);  // and is not auto-ranged again
 assert.deepEqual(layers, original);
 const click = {stopPropagation() {}};
 cards.get('b').visibility.handlers.click(click);

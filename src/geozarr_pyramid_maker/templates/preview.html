@@ -377,6 +377,12 @@ function attrLimits(a, vmin, vmax, name) {
   if (hi !== null) vmax = hi;
   return [vmin, vmax <= vmin ? vmin + 1 : vmax];
 }
+// D-52 (mirrors preview._has_attr_limits): true when attrLimits takes a limit from the attrs.
+function hasAttrLimits(a) {
+  const lo = attrNum(a.vmin), hi = attrNum(a.vmax);
+  if (lo !== null && hi !== null && hi <= lo) return false;
+  return lo !== null || hi !== null;
+}
 async function browserConfig(src, endpoint) {
   const url = publicStoreUrl(src, endpoint);
   const metadata = async (path) => {
@@ -423,7 +429,8 @@ async function browserConfig(src, endpoint) {
       // D-43: plot defaults from the attrs (categorical ignores them); `cmap` is resolved later, in defaultStyle.
       if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);
       const v = {name, dims: extra, categorical, units: String(a.units || ''), long_name: String(a.long_name || ''),
-        display_name: String(a.long_name || name), vmin, vmax, ticks: []};
+        display_name: String(a.long_name || name), vmin, vmax, ticks: [],
+        limits_from_attrs: !categorical && hasAttrLimits(a)};
       if (!categorical && a.cmap != null) v.cmap = String(a.cmap);
       if (categorical) {
         v.values = [...new Set(values)].slice(0, 20);
@@ -749,12 +756,16 @@ function resolveCmap(v) {
   return {cmap: 'viridis', reversed: !!v.reversed};
 }
 const defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax});
+// D-52: variables whose colour range was set explicitly (stored, from the URL or edited on the card). The automatic
+// Auto on add only runs for the others; the attrs limits (v.limits_from_attrs) count too.
+const explicit = new Set();
 const styles = {};
 function loadStyle(v) {
   try {
     const raw = store.get(styleKey(v));
     const s = raw ? JSON.parse(raw) : null;
     if (s && cmaps[s.cmap] && Number.isFinite(s.vmin) && Number.isFinite(s.vmax) && s.vmin < s.vmax) {
+      explicit.add(v.name);
       return {cmap: s.cmap, reversed: !!s.reversed, vmin: s.vmin, vmax: s.vmax};
     }
   } catch (_) { /* corrupt entry: use the defaults */ }
@@ -889,7 +900,10 @@ function styleParams(vars) {
     const lo = get('vmin'), hi = get('vmax');
     if (lo !== null && lo !== '' && Number.isFinite(Number(lo))) st.vmin = Number(lo);
     if (hi !== null && hi !== '' && Number.isFinite(Number(hi))) st.vmax = Number(hi);
-    if (st.vmin < st.vmax) styles[name] = st;
+    if (st.vmin < st.vmax) {
+      styles[name] = st;
+      if (['cmap', 'rev', 'vmin', 'vmax'].some((k) => get(k) !== null && get(k) !== '')) explicit.add(name);
+    }
   });
 })();
 
@@ -1264,12 +1278,14 @@ function buildStyleControls(v, opts, entry) {
     maxIn.value = String(+s.vmax.toPrecision(6));
     cmBar.style.background = gradientCss(stopsOf(s));
   };
-  const apply = (clear) => {
+  // `auto`: the automatic Auto on add (D-52), neither stored nor marked explicit.
+  const apply = (clear, auto) => {
     const legend = buildLegend(v);
     entry.legend.replaceWith(legend);
     entry.legend = legend;
     sync();
-    if (clear) store.remove(styleKey(v)); else store.set(styleKey(v), JSON.stringify(styleOf(v)));
+    if (clear) { store.remove(styleKey(v)); explicit.delete(v.name); }
+    else if (!auto) { store.set(styleKey(v), JSON.stringify(styleOf(v))); explicit.add(v.name); }
     syncUrl();
     const vl = state.vlayers.get(v.name);
     if (vl) for (const l of vl.layers) l.setStyle({color: colorExpr(v)});
@@ -1292,20 +1308,24 @@ function buildStyleControls(v, opts, entry) {
   rev.addEventListener('change', () => { styleOf(v).reversed = rev.checked; apply(false); });
   minIn.addEventListener('change', setRange);
   maxIn.addEventListener('change', setRange);
-  autoBtn.addEventListener('click', () => {
+  // Auto for the current frame; false (style kept) when nothing is loaded. The button is a user edit,
+  // entry.auto is the automatic run after a layer is added (D-52).
+  const runAuto = (auto) => {
     const r = autoRange(frameValues(v.name));
-    if (!r) {  // nothing loaded for the current slice: keep the style
-      autoBtn.title = AUTO_NONE;
-      flashBad();
-      return;
-    }
-    autoBtn.title = AUTO_TITLE;
+    if (!r) return false;
     styleOf(v).vmin = r.vmin; styleOf(v).vmax = r.vmax;
     if (r.symmetric) {  // balanced signs: use a diverging colourmap unless the current one already is (D-49)
       const sym = symmetricCmap(styleOf(v).cmap, styleOf(v).reversed);
       styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;
     }
-    apply(false);
+    apply(false, auto);
+    return true;
+  };
+  entry.auto = () => runAuto(true);
+  autoBtn.addEventListener('click', () => {
+    if (runAuto(false)) { autoBtn.title = AUTO_TITLE; return; }
+    autoBtn.title = AUTO_NONE;  // nothing loaded for the current slice: keep the style
+    flashBad();
   });
   minMaxBtn.addEventListener('click', () => {  // true extent of the current frame; colourmap untouched (D-51)
     const e = frameExtent(v.name);
@@ -1765,11 +1785,28 @@ function updateSpine() {
   $('sbspine').title = `${cfg.source || cfg.title} · ${names}`;
 }
 
+// Auto range on add (D-52): once the map has rendered the new layer, run the card's Auto, unless the range was set
+// explicitly (stored, URL, attrs, edited) or the variable is categorical. An empty render (no tiles in view yet) is
+// retried on the next two; a variable removed, hidden or edited meanwhile is skipped.
+const autoPending = new Set();
+function autoOnAdd(name) {
+  const v = varOf(name);
+  if (v.categorical || v.limits_from_attrs || explicit.has(name) || autoPending.has(name)) return;
+  autoPending.add(name);
+  const attempt = (left) => state.map.once('rendercomplete', () => {
+    const live = state.selected.includes(name) && !state.hidden.has(name) && !explicit.has(name);
+    if (live && !cards.get(name).auto() && left > 1) return attempt(left - 1);
+    autoPending.delete(name);
+  });
+  attempt(3);
+}
+
 // Add or remove one variable's layer group; other variables' layers are left untouched.
 function addVariable(name) {
   const vl = makeLayers(varOf(name));
   state.vlayers.set(name, vl);
   for (const l of vl.layers) state.map.getLayers().push(l);  // above the existing data layers
+  autoOnAdd(name);
 }
 
 function removeVariable(name) {
@@ -1992,6 +2029,7 @@ function init() {
   state.map = new Map({target: 'map', layers: [...basemaps, ...dataLayers], view});
   initReadout(state.map);
   state.map.on('moveend', syncUrl);
+  state.selected.forEach(autoOnAdd);
   syncUrl();
   initCenterLon();
 }

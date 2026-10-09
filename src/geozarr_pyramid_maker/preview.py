@@ -225,6 +225,14 @@ def _attr_limits(
     return vmin, vmax
 
 
+def _has_attr_limits(attrs: dict[str, Any]) -> bool:
+    """True when ``_attr_limits`` takes a limit from the attrs (D-52: no automatic Auto then)."""
+    lo, hi = _real(attrs.get("vmin")), _real(attrs.get("vmax"))
+    if lo is not None and hi is not None and hi <= lo:
+        return False
+    return lo is not None or hi is not None
+
+
 def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, Any]:
     dims = list(arr.metadata.dimension_names or ())
     extra = [d for d in dims if d not in sdims]
@@ -261,6 +269,7 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
         cfg["vmax"] = _clean(uniq[-1]) if uniq.size else 1.0
         cfg["ticks"] = []
         cfg["cmap"], cfg["reversed"] = "viridis", False  # categorical: palette, attrs ignored
+        cfg["limits_from_attrs"] = False
     else:
         if valid.size:
             vmin, vmax = (float(v) for v in np.nanpercentile(valid, [2, 98]))
@@ -268,6 +277,7 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
             vmin, vmax = 0.0, 1.0
         vmin, vmax = _attr_limits(attrs, vmin, vmax, name)
         cfg["vmin"], cfg["vmax"] = _clean(vmin), _clean(vmax)
+        cfg["limits_from_attrs"] = _has_attr_limits(attrs)
         cfg["cmap"], cfg["reversed"] = _attr_cmap(attrs, name)
         cfg["ticks"] = _nice_ticks(cfg["vmin"], cfg["vmax"])
     return cfg
