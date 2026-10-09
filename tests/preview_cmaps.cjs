@@ -63,21 +63,52 @@ for (const name of ['bone', 'Spectral', 'berlin', 'managua', 'RdYlBu', 'twilight
   assert.ok(values(sel).includes(name), name);
 }
 
-// Unchecking matplotlib hides every core group but the card's current map; the lookup is unaffected.
+// The last remaining source cannot be unchecked (D-47): the box is disabled and a programmatic change is refused.
+const box = (n) => elements['cmap-' + n];
+const change = (n, on) => { box(n).checked = on; box(n).handlers.change(); };
+assert.equal(box('matplotlib').disabled, true);
+assert.match(box('matplotlib').title, /At least one colourmap source/);
+assert.equal(box('cmocean').disabled, false);
+assert.equal(box('cmocean').title, '');
+const refused = element('select');
+run('cmapFills').add(() => run('fillCmapSelect')(refused, 'viridis'));
+run('cmapFills').forEach((f) => f());
+change('matplotlib', false);
+assert.equal(box('matplotlib').checked, true);
+assert.equal(run('cmapShow').core, true);
+assert.equal(storage.has('gpm-preview:cmaps-matplotlib'), false);
+run('setCmapShow')('core', false);
+assert.equal(run('cmapShow').core, true);
+assert.equal(storage.has('gpm-preview:cmaps-matplotlib'), false);
+assert.equal(labelsOf(refused).length, 6);
+// Checking a second source re-enables the first.
+change('cmasher', true);
+assert.equal(box('matplotlib').disabled, false);
+assert.equal(box('cmasher').disabled, false);
+assert.equal(box('cmocean').disabled, false);
+assert.equal(box('matplotlib').title, '');
+run('cmapFills').clear();
+
+// Unchecking matplotlib (cmasher is on) hides every core group but the card's current map; the lookup is unaffected.
 const mpl = element('select');
 run('cmapFills').add(() => run('fillCmapSelect')(mpl, 'viridis'));
 run('cmapFills').forEach((f) => f());
 elements['cmap-matplotlib'].checked = false;
 elements['cmap-matplotlib'].handlers.change();
 assert.equal(storage.get('gpm-preview:cmaps-matplotlib'), '0');
-assert.deepEqual(optionsOf(mpl), [['Perceptually uniform sequential', 'viridis', 'viridis']]);
+assert.deepEqual(optionsOf(mpl).filter((o) => !o[0].startsWith('cmasher')), [['Perceptually uniform sequential', 'viridis', 'viridis']]);
 assert.equal(mpl.value, 'viridis');
+assert.equal(box('cmasher').disabled, true);
 assert.ok(run('cmaps')['plasma'] && run('cmaps')['cmo.thermal']);
 run('fillCmapSelect')(sel, 'cmo.thermal');
-assert.deepEqual(optionsOf(sel), [['cmocean: Sequential', 'cmo.thermal', 'thermal']]);
+assert.deepEqual(optionsOf(sel).filter((o) => o[0].startsWith('cmocean')), [['cmocean: Sequential', 'cmo.thermal', 'thermal']]);
 elements['cmap-matplotlib'].checked = true;
 elements['cmap-matplotlib'].handlers.change();
 assert.equal(storage.get('gpm-preview:cmaps-matplotlib'), '1');
+assert.equal(labelsOf(mpl).length, 9);
+assert.equal(box('cmasher').disabled, false);
+change('cmasher', false);
+assert.equal(box('matplotlib').disabled, true);
 assert.equal(labelsOf(mpl).length, 6);
 run('cmapFills').clear();
 
@@ -135,19 +166,39 @@ run = load(makeContext({}, new Map([['gpm-preview:cmaps-cmocean', '1']])));
 assert.equal(elements['cmap-cmocean'].checked, true);
 assert.equal(elements['cmap-cmasher'].checked, false);
 assert.equal(elements['cmap-matplotlib'].checked, true);  // nothing stored: matplotlib on
-run = load(makeContext({}, new Map([['gpm-preview:cmaps-matplotlib', '0']])));
-assert.equal(elements['cmap-matplotlib'].checked, false);
 run = load(makeContext({}, new Map([['gpm-preview:cmaps-matplotlib', '1']])));
 assert.equal(elements['cmap-matplotlib'].checked, true);
+// No source on in storage (matplotlib '0', or everything off): matplotlib on at load, nothing written back.
+for (const kv of [new Map([['gpm-preview:cmaps-matplotlib', '0']]),
+  new Map([['gpm-preview:cmaps-matplotlib', '0'], ['gpm-preview:cmaps-cmocean', '0'], ['gpm-preview:cmaps-cmasher', '0']])]) {
+  const before = new Map(kv);
+  run = load(makeContext({}, kv));
+  assert.equal(box('matplotlib').checked, true);
+  assert.equal(box('cmocean').checked, false);
+  assert.equal(box('cmasher').checked, false);
+  assert.equal(box('matplotlib').disabled, true);
+  assert.deepEqual([...kv], [...before]);
+  const fb2 = element('select');
+  run('fillCmapSelect')(fb2, 'viridis');
+  assert.equal(labelsOf(fb2).length, 6);
+}
+// Normal stored states are respected: only cmocean on leaves cmocean checked and disabled.
+run = load(makeContext({}, new Map([['gpm-preview:cmaps-matplotlib', '0'], ['gpm-preview:cmaps-cmocean', '1']])));
+assert.equal(box('matplotlib').checked, false);
+assert.equal(box('cmocean').checked, true);
+assert.equal(box('cmocean').disabled, true);
+assert.equal(box('matplotlib').disabled, false);
+assert.equal(box('cmasher').disabled, false);
 // Storage failure (the real `store` swallows errors and returns null): defaults hold, state stays in memory.
 run = load(makeContext({store: {get: () => null, set() { /* swallowed like the real store */ }}}));
 assert.equal(elements['cmap-cmocean'].checked, false);
 assert.equal(elements['cmap-matplotlib'].checked, true);
 const mem = element('select');
 run('cmapFills').add(() => run('fillCmapSelect')(mem, 'viridis'));
-elements['cmap-matplotlib'].checked = false;
-elements['cmap-matplotlib'].handlers.change();
-assert.equal(optionsOf(mem).length, 1);
+change('cmocean', true);
+change('matplotlib', false);
+assert.equal(optionsOf(mem).filter((o) => o[0].startsWith('Perceptually')).length, 1);
+assert.equal(optionsOf(mem).filter((o) => o[0].startsWith('cmocean')).length, 22);
 
 // Blank viewer: no store, no control.
 load(makeContext({}, new Map(), true));
@@ -171,10 +222,10 @@ const fb = element('select');
 run('fillCmapSelect')(fb, 'viridis');
 assert.deepEqual(optionsOf(fb).map((o) => o.join(':')), ['Sequential:viridis:viridis', 'Diverging:RdBu_r:RdBu_r', 'Diverging:BrBG:BrBG']);
 // The fallback groups are core too: they follow the matplotlib checkbox and keep the current map.
-elements['cmap-matplotlib'].checked = false;
-elements['cmap-matplotlib'].handlers.change();
+change('cmasher', true);
+change('matplotlib', false);
 run('fillCmapSelect')(fb, 'BrBG');
-assert.deepEqual(optionsOf(fb).map((o) => o.join(':')), ['Diverging:BrBG:BrBG']);
+assert.deepEqual(optionsOf(fb).map((o) => o.join(':')), ['Diverging:BrBG:BrBG']);  // no cmasher maps in this config
 
 // Arrow-key stepping (stepSelect): previous/next listed option across optgroups, clamped, modifiers ignored.
 run = load(makeContext({}, new Map()));  // fresh defaults: matplotlib groups listed
@@ -242,11 +293,11 @@ assert.equal(current, values(keySel)[start + 3]);
 press('ArrowLeft');
 assert.equal(keySel.value, values(keySel)[start + 2]);
 // A select listing only the current map (hidden groups) has nowhere to step.
+run = load(makeContext({cfg: {colormaps: {viridis: [[0, 0, 0]]}, colormap_groups: [{label: 'One', source: 'core', names: ['viridis']}],
+  ramp: [[0, 0, 0]], title: 't'}}, new Map()));
 const lone = element('select');
 Object.defineProperty(lone, 'options', {get: () => lone.children.flatMap((og) => og.children)});
 lone.dispatchEvent = () => { throw new Error('unexpected change'); };
-elements['cmap-matplotlib'].checked = false;
-elements['cmap-matplotlib'].handlers.change();
 run('fillCmapSelect')(lone, 'viridis');
 run('stepSelect')(lone, {key: 'ArrowRight', preventDefault() {}, stopPropagation() {}});
 assert.equal(lone.value, 'viridis');
