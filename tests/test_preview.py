@@ -600,18 +600,25 @@ def test_template_colormap_group_controls(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     for token in (
         "cfg.colormap_groups",
+        "gpm-preview:cmaps-matplotlib",
         "gpm-preview:cmaps-cmocean",
         "gpm-preview:cmaps-cmasher",
         'id="cmapmore"',
+        'id="cmap-matplotlib"',
         'id="cmap-cmocean"',
         'id="cmap-cmasher"',
-        "More colourmaps",
+        "Colourmaps:",
         "function fillCmapSelect",
-        "function setCmapExtra",
+        "function setCmapShow",
     ):
         assert token in html, token
+    assert "More colourmaps" not in html
     assert "const DIVERGING" in html  # fallback split for configs without colormap_groups
-    assert 'id="cmap-cmocean" checked' not in html and 'id="cmap-cmasher" checked' not in html
+    # order: matplotlib, cmocean, cmasher; defaults come from stored state, not the markup
+    boxes = [html.index(f'id="cmap-{n}"') for n in ("matplotlib", "cmocean", "cmasher")]
+    assert boxes == sorted(boxes)
+    assert not any(f'id="cmap-{n}" checked' in html for n in ("matplotlib", "cmocean", "cmasher"))
+    assert "flex-wrap: wrap" in html.split("#cmapmore {")[1].split("}")[0]
     # the control sits above the attribution and the vertical dim stack above the control
     assert "#cmapmore {" in html and "bottom: calc(var(--scrub-h) + 36px)" in html
     assert "#dimstack { position: absolute; z-index: 4; right: var(--sp);" in html
@@ -619,7 +626,7 @@ def test_template_colormap_group_controls(tiny, tmp_path):
 
 
 def test_viewer_colormap_groups_behaviour():
-    """Run the viewer's colourmap option code: grouping, hidden groups, keep-current-value."""
+    """Run the viewer's colourmap option code: grouping, toggles, defaults, keep-current-value."""
     import shutil
     import subprocess
     from pathlib import Path
