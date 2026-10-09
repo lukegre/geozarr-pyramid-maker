@@ -160,7 +160,13 @@
   .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
   #sbfoot { padding: 12px 16px; border-top: 1px solid var(--card-line); }
   #sbfoot label, #dimroles-title, #cmapmore-title { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
-  #gs-title { margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+  #gs-title { margin: 0 0 8px; padding: 0; width: 100%; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text); }
+  #gs-title:hover { color: var(--text); }
+  #gs-title .gsicon { display: grid; flex: none; color: var(--muted); }
+  #gs-title .gsicon svg { width: 14px; height: 14px; }
+  #gs-title:hover .gsicon { color: var(--text); }
+  #gs-title .chev { margin-left: auto; color: var(--muted); }
+  #sbfoot.gs-collapsed #gs-title { margin-bottom: 0; }
   #labelrow { margin-bottom: 10px; }
   #lonrow, #dimroles, #cmapmore { margin-top: 10px; }
   #dimroles label.dimrow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp);
@@ -275,7 +281,12 @@
     </section>
   </div>
   <div id="sbfoot">
-    <div id="gs-title">Global settings</div>
+    <button type="button" id="gs-title" class="sectoggle" aria-expanded="true" aria-controls="gs-body">
+      <span class="gsicon" id="gs-icon"></span>
+      <span>Global settings</span>
+      <svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div id="gs-body">
     <div id="labelrow">
       <label for="labelmode">Label by</label>
       <select id="labelmode">
@@ -298,6 +309,7 @@
     <div id="lonrow" hidden>
       <label for="centerlon">Centre longitude</label>
       <input id="centerlon" type="number" min="-180" max="180" step="10" value="0">
+    </div>
     </div>
     <div id="note" hidden>Open via the preview server (geozarr-pyramid preview --serve); opening this
       page directly from disk will not work.</div>
@@ -573,6 +585,7 @@ function initStorePicker() {
 const showError = (e) => { console.error(e); $('error').textContent = String(e && e.message || e); };
 const SIDEBAR_KEY = 'gpm-preview:sidebar-collapsed';
 const OTHER_KEY = 'gpm-preview:other-collapsed';
+const GLOBAL_KEY = 'gpm-preview:global-collapsed';
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* storage unavailable */ } },
@@ -580,6 +593,7 @@ const store = {
 };
 if (location.protocol === 'file:') $('note').hidden = false;
 let otherCollapsed = store.get(OTHER_KEY) === '1';
+let globalCollapsed = store.get(GLOBAL_KEY) === '1';
 if (store.get(SIDEBAR_KEY) === '1') document.body.classList.add('collapsed');
 
 // The CRS has to be registered before the GeoZarr source resolves it.
@@ -686,6 +700,22 @@ function setLabelMode(mode) {
   store.set(LABEL_KEY, labelMode);
   applyLabels();
 }
+function initGlobalCollapse() {
+  const toggle = $('gs-title');
+  $('gs-icon').innerHTML = ICON.gear;
+  const apply = () => {
+    toggle.setAttribute('aria-expanded', String(!globalCollapsed));
+    $('gs-body').hidden = globalCollapsed;
+    $('sbfoot').classList.toggle('gs-collapsed', globalCollapsed);
+  };
+  toggle.addEventListener('click', () => {
+    globalCollapsed = !globalCollapsed;
+    store.set(GLOBAL_KEY, globalCollapsed ? '1' : '0');
+    apply();
+  });
+  apply();
+}
+
 function initLabelMode() {
   $('labelrow').hidden = blank;
   const sel = $('labelmode');
@@ -1739,6 +1769,7 @@ function init() {
   initStorePicker();
   initSidebar();
   initLabelMode();
+  initGlobalCollapse();
   updateSpine();
   $('sbspine').addEventListener('click', () => $('sbtoggle').click());
   buildInfo();

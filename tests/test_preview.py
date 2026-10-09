@@ -1774,7 +1774,7 @@ def test_viewer_label_mode_behaviour():
 def test_template_global_settings_footer(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     foot = html.split('<div id="sbfoot">', 1)[1].split("</aside>", 1)[0]
-    assert foot.lstrip().startswith('<div id="gs-title">Global settings</div>')
+    assert foot.lstrip().startswith('<button type="button" id="gs-title"')
     assert (
         foot.index("Global settings")
         < foot.index('id="labelrow"')
@@ -1792,6 +1792,51 @@ def test_template_global_settings_footer(tiny, tmp_path):
     assert "lines.push(`${labelOf(v)}:" in html
     assert "selVars().map((v) => labelOf(v)).join(', ')" in html
     assert "'info-vars'" in html
+
+
+def test_template_global_settings_collapsible(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    foot = html.split('<div id="sbfoot">', 1)[1].split("</aside>", 1)[0]
+    header = foot.split("</button>", 1)[0]
+    assert header.lstrip().startswith('<button type="button" id="gs-title"')
+    assert 'aria-expanded="true"' in header and 'aria-controls="gs-body"' in header
+    assert 'id="gs-icon"' in header and "<span>Global settings</span>" in header
+    assert 'class="chev"' in header
+    assert "$('gs-icon').innerHTML = ICON.gear;" in html
+    # the wrapper holds the controls; #note and #error stay outside it
+    body = foot.split('<div id="gs-body">', 1)[1]
+    controls = body.split('<div id="note"', 1)[0]
+    assert 'id="labelrow"' in controls and 'id="basemap"' in controls
+    assert (
+        'id="centerlon"' in controls and 'id="dimroles"' in controls and 'id="cmapmore"' in controls
+    )
+    assert 'id="error"' not in controls
+    assert "const GLOBAL_KEY = 'gpm-preview:global-collapsed';" in html
+    assert "let globalCollapsed = store.get(GLOBAL_KEY) === '1';" in html
+    assert "store.set(GLOBAL_KEY, globalCollapsed" in html
+    assert "initGlobalCollapse();" in html.split("function init() {", 1)[1]
+
+
+def test_viewer_global_settings_collapse_behaviour():
+    """Run the Global settings collapse: toggle, persistence and storage failure."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_global.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_viewer_uses_array_names():
