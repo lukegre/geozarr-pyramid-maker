@@ -17,6 +17,8 @@ const cmapGroups = [
 const context = vm.createContext({state, cmapGroups});
 vm.runInContext(html.slice(start, end), context);
 const autoRange = (v) => vm.runInContext('autoRange', context)(v);
+const frameExtent = (n) => vm.runInContext('frameExtent', context)(n);
+const minMaxRange = (a, b) => vm.runInContext('minMaxRange', context)(a, b);
 const frameValues = (n) => Array.from(vm.runInContext('frameValues', context)(n));
 const symmetricCmap = (c, r) => vm.runInContext('symmetricCmap', context)(c, r);
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
@@ -107,3 +109,41 @@ const big = new Float32Array(1000 * 1000).map((_, i) => i);
 set('b', [layerWith([{tile: tile(0, K, big, [1000, 1000])}])], [K]);
 const n = frameValues('b').length;
 assert.ok(n > 0 && n <= 200000, `n = ${n}`);
+
+// frameExtent / minMaxRange (D-51): true extremes of the current frame, every pixel scanned (no stride).
+// 1500x1500 = 2.25M values > AUTO_MAX, so the stride of frameValues skips pixels; the extremes sit off-grid.
+const huge = new Float32Array(1500 * 1500).fill(5);
+huge[1 * 1500 + 1] = -42;   // row 1, col 1: not on any stride >= 2 grid
+huge[1499 * 1500 + 1499] = 99;  // last pixel: not on the stride grid either
+set('h', [layerWith([{tile: tile(0, K, huge, [1500, 1500])}])], [K]);
+const sampled = frameValues('h');
+assert.ok(sampled.length <= 200000 && sampled.every((x) => x === 5), 'stride misses the extremes');
+assert.deepEqual({...frameExtent('h')}, {min: -42, max: 99});
+// stale keys ignored, only the highest z used, across world copies
+set('e', [layerWith([
+  {tile: tile(2, 'a:{"t":0}', new Float32Array([-1000, 1000, 0, 0]))},  // stale slice
+  {tile: tile(0, K, new Float32Array([-500, 500, 0, 0]))},              // coarser than z = 1
+  {tile: tile(1, K, new Float32Array([3, 8, NaN, -2]))},
+]), layerWith([{tile: tile(1, K, new Float32Array([20, 1, 1, 1]))}])], [K, K]);
+assert.deepEqual({...frameExtent('e')}, {min: -2, max: 20});
+// nodata (alpha 0) and non-finite values are skipped
+set('n', [layerWith([{tile: tile(0, K, new Float32Array([-9, 0, 4, 1, Infinity, 1, 6, 1]))}])], [K]);  // 2 bands
+assert.deepEqual({...frameExtent('n')}, {min: 4, max: 6});
+// gutter handled as in frameValues
+set('gx', [layerWith([{gutter: 1, tile: tile(0, K, new Float32Array([-7, 0, 0, 0, 5, 0, 0, 0, 77]), [1, 1])}])], [K]);
+assert.deepEqual({...frameExtent('gx')}, {min: 5, max: 5});
+// nothing loaded, no renderer, unknown variable, all nodata -> null
+assert.equal(frameExtent('y'), null);
+assert.equal(frameExtent('z'), null);
+assert.equal(frameExtent('missing'), null);
+set('nan', [layerWith([{tile: tile(0, K, new Float32Array([NaN, NaN, NaN, NaN]))}])], [K]);
+assert.equal(frameExtent('nan'), null);
+// minMaxRange: exact limits, max = min + 1 for constant data, null passes through
+assert.deepEqual({...minMaxRange(-3, 8)}, {vmin: -3, vmax: 8});
+assert.deepEqual({...minMaxRange(4, 4)}, {vmin: 4, vmax: 5});
+assert.deepEqual({...minMaxRange(-2, 20)}, {vmin: -2, vmax: 20});
+assert.equal(minMaxRange(null, null), null);
+assert.equal(minMaxRange(NaN, 1), null);
+set('c', [layerWith([{tile: tile(0, K, new Float32Array([4, 4, 4, 4]))}])], [K]);
+const ce = frameExtent('c');
+assert.deepEqual({...minMaxRange(ce.min, ce.max)}, {vmin: 4, vmax: 5});
