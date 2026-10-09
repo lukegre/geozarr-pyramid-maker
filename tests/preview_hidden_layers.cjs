@@ -18,6 +18,7 @@ const collection = {
 const variables = ['a', 'b', 'c'].map((name) => ({name, dims: name === 'c' ? [] : ['time']}));
 const cards = new Map(variables.map((v) => [v.name, {}]));
 const made = [];
+const autoed = [];  // names autoOnAdd (D-53) ran for
 const context = vm.createContext({
   state: {selected: [], vlayers: new Map(), open: new Set(), hidden: new Set(), scrubKey: '', dims: {}},
   cfg: {variables}, cards, $: () => ({}), varOf: (name) => variables.find((v) => v.name === name),
@@ -29,6 +30,7 @@ const context = vm.createContext({
     made.push(v.name);
     return vl;
   },
+  autoOnAdd: (name) => autoed.push(name),
   stopPlay() {}, syncUrl() {}, updateSpine() {}, buildScrubber() {}, refreshCards() {}, unionDims: () => [],
 });
 context.state.map = {getLayers: () => collection};
@@ -43,6 +45,7 @@ for (const n of ['a', 'b', 'c']) context.moveVariable(n, true, state.selected.at
 assert.deepEqual(Array.from(state.selected), ['a', 'b', 'c']);
 assert.deepEqual(onMap(), ['a', 'a', 'b', 'b', 'c', 'c']);
 assert.equal(made.length, 3);
+assert.deepEqual(autoed, ['a', 'b', 'c']);  // each newly added visible variable is auto-ranged
 
 // Hiding disposes and removes the layers and creates nothing.
 const bLayers = state.vlayers.get('b').layers.slice();
@@ -97,3 +100,12 @@ const count = made.length;
 context.addVariable('a');
 assert.equal(made.length, count);
 assert.deepEqual(owners().sort(), ['b', 'c']);
+
+// D-53: a hidden variable gets no Auto; it gets one when first shown (addVariable creates its layers then).
+autoed.length = 0;
+state.selected.push('a');                 // selected while hidden
+context.addVariable('a');                 // 'a' is hidden here
+assert.deepEqual(autoed, []);
+context.toggleVisibility('a');            // show it
+assert.equal(state.vlayers.has('a'), true);
+assert.deepEqual(autoed, ['a']);

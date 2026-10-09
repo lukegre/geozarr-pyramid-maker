@@ -43,6 +43,17 @@ assert.deepEqual(limits({vmin: 3, vmax: 3}), [0, 10]);
 assert.equal(warnings.length, 2);
 warnings.length = 0;
 
+// hasAttrLimits (D-53): true when a limit comes from the attrs; inverted pairs and invalid values do not count.
+const has = (a) => run('hasAttrLimits')(a);
+assert.equal(has({}), false);
+assert.equal(has({vmin: 2}), true);
+assert.equal(has({vmax: 5}), true);
+assert.equal(has({vmin: 1, vmax: 5}), true);
+assert.equal(has({vmin: 8, vmax: 3}), false);
+assert.equal(has({vmin: '2', vmax: NaN}), false);
+assert.equal(has({cmap: 'magma'}), false);
+assert.equal(warnings.length, 0);
+
 // defaultStyle: without the new keys it is exactly the old default.
 assert.deepEqual(style({name: 'a', vmin: 1, vmax: 2}), {cmap: 'viridis', reversed: false, vmin: 1, vmax: 2});
 // Resolved config from the server.

@@ -581,6 +581,26 @@ def test_attr_categorical_ignores(multi_var, tmp_path):
     assert (by["melt"]["vmin"], by["melt"]["vmax"]) == (1.0, 2.0)
 
 
+def test_limits_from_attrs_flag(multi_var, tiny, tmp_path):
+    """D-53: the viewer skips the automatic Auto for variables whose limits come from the attrs."""
+
+    def flag(i, **attrs):
+        (tmp_path / str(i)).mkdir()
+        return _attr_var(tiny, tmp_path / str(i), **attrs)["limits_from_attrs"]
+
+    assert flag(0) is False
+    assert flag(1, vmin=1) is True
+    assert flag(2, vmax=9) is True
+    assert flag(3, vmin=1, vmax=9) is True
+    assert flag(4, cmap="magma") is False
+    assert flag(5, vmin=9, vmax=1) is False  # both given but inverted: both ignored (D-43)
+    ds = multi_var.copy(deep=True)
+    ds["mask"].attrs.update(vmin=-5, vmax=50)
+    by = {v["name"]: v for v in pv.read_config(_pyramid(ds, tmp_path))["variables"]}
+    assert by["mask"]["limits_from_attrs"] is False  # categorical: attrs ignored
+    assert by["melt"]["limits_from_attrs"] is False
+
+
 def test_attr_defaults_end_to_end_html(tiny, tmp_path):
     ds = tiny.copy(deep=True)
     ds["t"].attrs.update(cmap="cmo.thermal", vmin=270, vmax=np.float32(305.5))
@@ -627,6 +647,8 @@ def test_template_plot_defaults_hooks(tiny, tmp_path):
     assert "if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);" in html
     assert "if (!categorical && a.cmap != null) v.cmap = String(a.cmap);" in html
     assert "defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax})" in html
+    # D-53 marker, as preview.py
+    assert "limits_from_attrs: !categorical && hasAttrLimits(a)" in html
     assert "return defaultStyle(v);" in html  # initial style; the Reset button is gone (D-49)
     assert "styles[v.name] = defaultStyle(v)" not in html
 
@@ -1916,6 +1938,40 @@ def test_viewer_auto_range_behaviour():
             node,
             str(root / "tests/preview_range.cjs"),
             str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_template_auto_on_add_hooks(tiny, tmp_path):
+    """D-53: added layers, and those drawn at load, get an automatic Auto after the first render."""
+    _, _, html = _generate(tiny, tmp_path)
+    assert "state.map.once('rendercomplete'" in html
+    assert "entry.auto = () => runAuto(true);" in html
+    assert "  autoOnAdd(name);" in html  # in addVariable, after the layers are created
+    # first draw: visible variables only
+    assert "state.selected.filter((n) => state.vlayers.has(n)).forEach(autoOnAdd);" in html
+    assert "const explicit = new Set();" in html
+
+
+def test_viewer_auto_on_add_behaviour():
+    """Run the automatic Auto: trigger, retries, explicit-range tracking, no persistence."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_autoonadd.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+            str(root / "src/geozarr_pyramid_maker/colormaps.json"),
         ],
         check=True,
         capture_output=True,
