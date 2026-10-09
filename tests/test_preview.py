@@ -526,6 +526,121 @@ def test_template_reversed_resets_on_colormap_change(tiny, tmp_path):
     assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html
 
 
+_USER_CMAPS = {
+    "bone", "Spectral", "berlin", "managua", "RdYlBu", "twilight", "twilight_shifted", "gray",
+    "terrain",
+}  # fmt: skip
+
+
+def test_colormap_groups_data():
+    groups = pv.COLORMAP_GROUPS
+    labels = [g["label"] for g in groups]
+    assert labels == [
+        "Perceptually uniform sequential",
+        "Sequential",
+        "Sequential (2)",
+        "Diverging",
+        "Cyclic",
+        "Miscellaneous",
+        "cmocean",
+        "cmasher",
+    ]
+    assert "Qualitative" not in labels
+    assert [g["source"] for g in groups] == ["core"] * 6 + ["cmocean", "cmasher"]
+    listed = [n for g in groups for n in g["names"]]
+    assert len(listed) == len(set(listed)) and set(listed) == set(pv.COLORMAPS)
+    by_label = {g["label"]: g["names"] for g in groups}
+    assert by_label["Perceptually uniform sequential"] == [
+        "viridis", "plasma", "inferno", "magma", "cividis",
+    ]  # fmt: skip
+    assert "turbo" in by_label["Miscellaneous"] and "turbo" not in by_label["Sequential"]
+    assert {"RdBu", "RdBu_r", "coolwarm", "BrBG", "PuOr"} <= set(by_label["Diverging"])
+    assert set(pv.COLORMAPS) >= _USER_CMAPS
+    assert not any(n.endswith("_r") for n in listed if n != "RdBu_r")
+    for g in groups:
+        prefix = {"core": None, "cmocean": "cmo.", "cmasher": "cmr."}[g["source"]]
+        for n in g["names"]:
+            assert (prefix is None and "." not in n) or (prefix and n.startswith(prefix)), n
+    assert {"cmo.thermal", "cmo.balance", "cmr.ember", "cmr.ocean"} <= set(pv.COLORMAPS)
+    assert "ocean" in by_label["Miscellaneous"] and "gray" in by_label["Sequential (2)"]
+
+
+def test_colormaps_are_11_rgb_stops():
+    for name, stops in pv.COLORMAPS.items():
+        assert len(stops) == 11, name
+        assert all(
+            len(c) == 3 and all(isinstance(x, int) and 0 <= x <= 255 for x in c) for c in stops
+        ), name
+
+
+def test_colormaps_json_is_the_source():
+    data = json.loads(
+        resources.files("geozarr_pyramid_maker").joinpath("colormaps.json").read_text()
+    )
+    assert data["colormaps"] == pv.COLORMAPS and data["groups"] == pv.COLORMAP_GROUPS
+    assert pv.COLORMAPS["viridis"][0] == [68, 1, 84]
+    assert pv.COLORMAPS["viridis"][5] == [33, 145, 140]
+    assert pv.COLORMAPS["RdBu_r"][0] == [5, 48, 97]
+    assert pv.COLORMAPS["turbo"][-1] == [122, 4, 3]
+
+
+def test_colormap_groups_in_page_config(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    cfg = _config(html)
+    assert cfg["colormap_groups"] == pv.COLORMAP_GROUPS and cfg["colormaps"] == pv.COLORMAPS
+    template = _config(
+        resources.files("geozarr_pyramid_maker").joinpath("templates/preview.html").read_text()
+    )
+    assert template["colormap_groups"] == pv.COLORMAP_GROUPS
+    assert template["colormaps"] == pv.COLORMAPS
+    assert pv.blank_config()["colormap_groups"] == pv.COLORMAP_GROUPS
+
+
+def test_template_colormap_group_controls(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    for token in (
+        "cfg.colormap_groups",
+        "gpm-preview:cmaps-cmocean",
+        "gpm-preview:cmaps-cmasher",
+        'id="cmapmore"',
+        'id="cmap-cmocean"',
+        'id="cmap-cmasher"',
+        "More colourmaps",
+        "function fillCmapSelect",
+        "function setCmapExtra",
+    ):
+        assert token in html, token
+    assert "const DIVERGING" in html  # fallback split for configs without colormap_groups
+    assert 'id="cmap-cmocean" checked' not in html and 'id="cmap-cmasher" checked' not in html
+    # the control sits above the attribution and the vertical dim stack above the control
+    assert "#cmapmore {" in html and "bottom: calc(var(--scrub-h) + 36px)" in html
+    assert "#dimstack { position: absolute; z-index: 4; right: var(--sp);" in html
+    assert "bottom: calc(var(--scrub-h) + 70px)" in html
+
+
+def test_viewer_colormap_groups_behaviour():
+    """Run the viewer's colourmap option code: grouping, hidden groups, keep-current-value."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_cmaps.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+            str(root / "src/geozarr_pyramid_maker/colormaps.json"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_global_flag(tiny, polar_3031, tmp_path):
     assert pv._is_global({"spatial:bbox": [-180, -90, 180, 90], "proj:code": "EPSG:4326"})
     assert pv._is_global({"spatial:bbox": [0, -90, 360, 90], "proj:code": "EPSG:4326"})

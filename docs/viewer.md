@@ -19,6 +19,13 @@ to Other. Expand settings to see the long name when available. Drag a card by it
 it between sections. The map follows the selected card order. All cards can be removed. Other remains visible as a
 drop target even when it is empty or collapsed. Visibility is preserved in shared URLs with `hidden=a,b`.
 
+## Colourmaps
+
+The colourmap list in a card's settings is grouped like the matplotlib reference (perceptually uniform, sequential,
+diverging, cyclic, miscellaneous). The **cmocean** and **cmasher** collections (listed as `cmo.<name>` and
+`cmr.<name>` in the URL) are off by default; tick their checkboxes at the bottom right of the map to list them.
+The choice is remembered in the browser.
+
 ## URL parameters
 
 | Parameter | Meaning |
