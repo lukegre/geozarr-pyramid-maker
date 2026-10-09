@@ -1621,6 +1621,28 @@ def test_read_config_attrs_and_levels(tiny, tmp_path):
     assert _config(gpm.preview(store).read_text())["attrs"]["title"] == "My title"
 
 
+def test_read_config_variable_attrs(tiny, tmp_path):
+    """D-55: each variable carries its array attrs as JSON-safe display values."""
+    ds = tiny.copy(deep=True)
+    ds["t"].attrs.update(units="K", long_name="Temp", vmin=1.5, count=3, flags=[1, 2], ok=True)
+    cfg = pv.read_config(_pyramid(ds, tmp_path))
+    [v] = cfg["variables"]
+    a = v["attrs"]
+    assert a["units"] == "K" and a["long_name"] == "Temp"
+    assert a["vmin"] == 1.5 and a["count"] == 3
+    assert a["flags"] == "1, 2" and a["ok"] == "True"
+    json.dumps(cfg, allow_nan=False)
+
+
+def test_variable_config_attrs_empty():
+    import zarr
+
+    arr = zarr.create_array(
+        zarr.storage.MemoryStore(), shape=(4, 4), dtype="float32", dimension_names=["y", "x"]
+    )
+    assert pv._variable_config("v", arr, ["y", "x"])["attrs"] == {}
+
+
 def test_blank_config_attrs_levels():
     cfg = pv.blank_config()
     assert cfg["attrs"] == {} and cfg["levels"] == 0
@@ -1709,6 +1731,28 @@ def test_viewer_selection_drag_behaviour():
         [
             node,
             str(root / "tests/preview_selection.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_viewer_variable_info_popover():
+    """D-55: info button on every card, attrs table, toggle/move/close, browser attr formatting."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_varinfo.cjs"),
             str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
         ],
         check=True,

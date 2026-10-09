@@ -61,7 +61,7 @@
   body.collapsed #sbtoggle { right: 4px; }
   body.collapsed #sbtoggle svg { transform: rotate(180deg); }
   body.collapsed #sidebar > :not(#sbtoggle, #sbspine) { display: none; }
-  body.collapsed #topbar, body.collapsed #infopanel { display: none; }
+  body.collapsed #topbar, body.collapsed #infopanel, body.collapsed #varinfo { display: none; }
   #sbspine { display: none; }
   body.collapsed #sbspine { display: block; position: absolute; top: 44px; bottom: 12px; left: 0; right: 0;
     padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
@@ -90,17 +90,22 @@
     border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
   .iconbtn svg { width: 16px; height: 16px; }
   #infobtn[aria-expanded="true"] { background: var(--hover); color: var(--text); }
-  #infopanel { position: fixed; z-index: 12; top: calc(var(--top-h) + 4px); right: var(--sp);
+  #infopanel, #varinfo { position: fixed; z-index: 12; top: calc(var(--top-h) + 4px); right: var(--sp);
     width: min(520px, calc(100vw - 2 * var(--sp))); max-height: calc(100vh - var(--top-h) - 16px);
     overflow: auto; box-sizing: border-box; padding: var(--sp) 12px 12px; border-radius: var(--radius);
     background: var(--card); box-shadow: var(--shadow); border: 1px solid var(--card-line); font-size: 12px; }
   #infopanel h2 { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted);
     text-transform: uppercase; letter-spacing: .04em; }
-  #infopanel table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  #infopanel th, #infopanel td { padding: 3px 6px; text-align: left; vertical-align: top;
+  #infopanel table, #varinfo table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  #infopanel th, #infopanel td, #varinfo th, #varinfo td { padding: 3px 6px; text-align: left; vertical-align: top;
     border-top: 1px solid var(--card-line); overflow-wrap: anywhere; }
-  #infopanel th { width: 32%; font-weight: 600; color: var(--muted); }
-  #infopanel td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  #infopanel th, #varinfo th { width: 32%; font-weight: 600; color: var(--muted); }
+  #infopanel td, #varinfo td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  /* D-55: per-variable attributes popover, anchored beside the clicked card icon (placed in JS) */
+  #varinfo { right: auto; width: min(420px, calc(100vw - 2 * var(--sp))); }
+  #varinfo .vtitle { margin: 0 0 6px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+  #varinfo .none { color: var(--muted); }
+  .card .info[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   #s3row { display: flex; flex-direction: column; gap: 3px; margin: 0 16px 8px; font-size: 12px; }
   #s3row label { font-weight: 600; color: var(--muted); }
   #s3row[hidden] { display: none; }
@@ -256,6 +261,7 @@
   </button>
 </header>
 <div id="infopanel" hidden></div>
+<div id="varinfo" hidden></div>
 <aside id="sidebar">
   <button id="sbtoggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor"
@@ -432,7 +438,8 @@ async function browserConfig(src, endpoint) {
       if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);
       const v = {name, dims: extra, categorical, units: String(a.units || ''), long_name: String(a.long_name || ''),
         display_name: String(a.long_name || name), vmin, vmax, ticks: [],
-        limits_from_attrs: !categorical && hasAttrLimits(a)};
+        limits_from_attrs: !categorical && hasAttrLimits(a),
+        attrs: Object.fromEntries(Object.entries(a).map(([k, x]) => [k, attrValue(x)]))};
       if (!categorical && a.cmap != null) v.cmap = String(a.cmap);
       if (categorical) {
         v.values = [...new Set(values)].slice(0, 20);
@@ -706,11 +713,13 @@ function labelOf(v) {
   return labelMode === 'long' && v.long_name?.trim() ? (v.display_name || v.long_name) : v.name;
 }
 function applyLabels() {
+  closeVarInfo();  // D-55: its title is a label
   for (const [name, c] of cards) {
     const v = varOf(name);
     c.title.textContent = labelOf(v);
     c.handle.setAttribute('aria-label', `Drag ${labelOf(v)}`);
     c.remove.setAttribute('aria-label', `Remove ${labelOf(v)} from Selected`);
+    c.info.setAttribute('aria-label', `Attributes of ${labelOf(v)}`);
     // the settings line adds the other name: the long name in Array name mode, the array name in Long name mode
     if (c.longname) c.longname.textContent = labelMode === 'long' ? v.name : (v.display_name || v.long_name);
   }
@@ -985,6 +994,7 @@ const ICON = {
   pause: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>',
   prev: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   next: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  info: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>',
   gear: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h7M13 4h1M2 12h1M7 12h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="11" cy="4" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
 };
 
@@ -1109,6 +1119,13 @@ function buildCards() {
     });
     const title = h('div', 'name', labelOf(v));
     top.append(handle, title);
+    const info = h('button', 'iconbtn info');
+    info.type = 'button';
+    info.innerHTML = ICON.info;
+    info.title = 'Attributes';
+    info.setAttribute('aria-label', `Attributes of ${labelOf(v)}`);
+    info.setAttribute('aria-expanded', 'false');
+    info.addEventListener('click', (e) => { e.stopPropagation(); toggleVarInfo(v, info); });
     const gear = h('button', 'iconbtn gear');
     gear.type = 'button';
     gear.innerHTML = ICON.gear;
@@ -1122,7 +1139,7 @@ function buildCards() {
     remove.title = 'Remove from Selected';
     remove.setAttribute('aria-label', `Remove ${labelOf(v)} from Selected`);
     remove.addEventListener('click', (e) => { e.stopPropagation(); moveVariable(v.name, false); });
-    top.append(visibility, gear, remove);
+    top.append(info, visibility, gear, remove);
     card.append(top);
     const meta = [unitsOf(v), ...v.dims].filter(Boolean).join(' · ');
     if (meta) card.append(h('div', 'meta', meta));
@@ -1139,7 +1156,7 @@ function buildCards() {
     const olab = h('label', '', 'Opacity');
     orow.append(olab, slider);
     opts.append(orow);
-    const entry = {el: card, gear, visibility, slider, legend, title, handle, remove, longname, sync: null};
+    const entry = {el: card, info, gear, visibility, slider, legend, title, handle, remove, longname, sync: null};
     if (!v.categorical) entry.sync = buildStyleControls(v, opts, entry);
     opts.addEventListener('click', (e) => e.stopPropagation());
     card.append(opts);
@@ -1471,10 +1488,61 @@ function buildInfo() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) setOpen(false); });
 }
 
+// D-55: attribute display values, mirroring `_attr_value` in preview.py (the in-browser loader formats variable attrs with it).
+function attrValue(x) {
+  let out;
+  if (typeof x === 'boolean') out = x ? 'True' : 'False';
+  else if (typeof x === 'number') out = Number.isFinite(x) ? x : String(x);
+  else if (typeof x === 'string') out = x;
+  else if (Array.isArray(x)) out = x.map((i) => typeof i === 'string' ? i : (i && typeof i === 'object' ? JSON.stringify(i) : String(i))).join(', ');
+  else if (x && typeof x === 'object') out = JSON.stringify(x);
+  else out = x == null ? 'None' : String(x);
+  return typeof out === 'string' && out.length > 2000 ? out.slice(0, 2000) + '\u2026' : out;
+}
+
+// D-55: one shared popover (#varinfo) lists a variable's array attrs next to the clicked card icon.
+let varInfoFor = null, varInfoBtn = null;
+function closeVarInfo() {
+  $('varinfo').hidden = true;
+  varInfoBtn?.setAttribute('aria-expanded', 'false');
+  varInfoFor = varInfoBtn = null;
+}
+function toggleVarInfo(v, btn) {
+  const wasOpen = varInfoFor === v.name;
+  closeVarInfo();
+  if (wasOpen) return;
+  const panel = $('varinfo');
+  const rows = Object.entries(v.attrs || {});
+  panel.replaceChildren(h('div', 'vtitle', labelOf(v)));
+  if (rows.length) {
+    const tbl = h('table'), body = h('tbody');
+    for (const [k, x] of rows) { const tr = h('tr'); tr.append(h('th', '', k), h('td', '', String(x))); body.append(tr); }
+    tbl.append(body); panel.append(tbl);
+  } else {
+    panel.append(h('div', 'none', 'No attributes'));
+  }
+  panel.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  // right of the sidebar (or of the button), vertically at the button, kept inside the viewport
+  const at = btn.getBoundingClientRect(), side = $('sidebar').getBoundingClientRect();
+  const left = Math.max(8, Math.min(Math.max(side.right, at.right) + 8, innerWidth - panel.offsetWidth - 8));
+  panel.style.left = `${left}px`;
+  panel.style.top = `${Math.max(8, Math.min(at.top, innerHeight - panel.offsetHeight - 8))}px`;
+  varInfoFor = v.name; varInfoBtn = btn;
+}
+function initVarInfo() {
+  // capture phase: card buttons stop propagation, so a bubbling listener would miss them
+  document.addEventListener('click', (e) => {
+    if (varInfoFor && !$('varinfo').contains(e.target) && !varInfoBtn.contains(e.target)) closeVarInfo();
+  }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && varInfoFor) closeVarInfo(); });
+}
+
 function initSidebar() {
   $('sbtoggle').addEventListener('click', () => {
     const collapsed = document.body.classList.toggle('collapsed');
     store.set(SIDEBAR_KEY, collapsed ? '1' : '0');
+    closeVarInfo();
     $('sbtoggle').setAttribute('aria-expanded', String(!collapsed));
     $('sbtoggle').setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
     state.map?.updateSize();
@@ -2053,6 +2121,7 @@ function init() {
   updateSpine();
   $('sbspine').addEventListener('click', () => $('sbtoggle').click());
   buildInfo();
+  initVarInfo();
   const basemaps = initBasemap();
   if (blank) {
     const b = cfg.bbox, lon = state.centerLon;

@@ -54,7 +54,7 @@ function makeContext(kv = new Map(), extra = {}) {
     h(tag, cls, text) { const el = element(); el.tag = tag; el.className = cls; if (text !== undefined) el.textContent = text; return el; },
     document: {createTextNode: (text) => ({text, textContent: text})},
     unitsOf: () => '', opacityOf: () => 1, buildLegend: () => element(), buildStyleControls: () => null,
-    toggleVar() {}, toggleVisibility() {}, moveVariable() {}, syncUrl() {}, clearDragFeedback() {},
+    toggleVar() {}, toggleVisibility() {}, moveVariable() {}, syncUrl() {}, clearDragFeedback() {}, closeVarInfo() {},
     ...extra,
   });
   vm.runInContext(between('const LABEL_KEY', '\nfunction labelOf'), ctx);

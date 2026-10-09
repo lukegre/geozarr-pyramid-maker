@@ -256,6 +256,7 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
         "categorical": bool(categorical),
         "units": str(attrs.get("units", "")),
         "long_name": str(attrs.get("long_name", "")),
+        "attrs": _display_attrs(attrs),  # D-55: shown in the card's info popover
     }
     cfg["display_name"] = _display_name(cfg["long_name"], name)
     cfg["units_display"] = _units_display(cfg["units"])
@@ -339,13 +340,20 @@ def _attr_value(value: Any) -> str | int | float:
     return out
 
 
+def _display_attrs(attrs: dict[str, Any]) -> dict[str, str | int | float]:
+    """Attrs as JSON-safe display values, in source order."""
+    return {str(k): _attr_value(v) for k, v in attrs.items()}
+
+
 def _global_attrs(attrs: dict[str, Any]) -> dict[str, str | int | float]:
     """Root attrs minus the pyramid/GeoZarr machinery, as JSON-safe display values."""
-    return {
-        str(k): _attr_value(v)
-        for k, v in attrs.items()
-        if k not in _MACHINERY_ATTRS and not str(k).startswith(("proj:", "spatial:"))
-    }
+    return _display_attrs(
+        {
+            k: v
+            for k, v in attrs.items()
+            if k not in _MACHINERY_ATTRS and not str(k).startswith(("proj:", "spatial:"))
+        }
+    )
 
 
 def read_config(
