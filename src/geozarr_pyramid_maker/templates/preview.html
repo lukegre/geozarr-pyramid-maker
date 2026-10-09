@@ -144,6 +144,7 @@
     border-radius: 6px; border: 1px solid var(--card-line); background: transparent; color: var(--text); }
   .card .opts select option, .card .opts select optgroup { background: var(--sidebar); color: var(--text); }
   .card .opts input.bad { outline: 2px solid #d1242f; }
+  .card .opts .sep { flex: none; }
   .card .opts .cmbar { flex: none; width: 56px; height: 10px; border-radius: 5px; }
   .card .opts .check { display: flex; align-items: center; gap: 6px; }
   .card .opts .btn { flex: 1; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--card-line);
@@ -1117,6 +1118,73 @@ function buildCards() {
   $('selhint').hidden = cfg.variables.length < 2;
 }
 
+const AUTO_TITLE = 'Set the range from the data in the current frame (2\u201398 %; symmetric if the signs balance)';
+const AUTO_NONE = 'No loaded data for the current frame';
+const AUTO_MAX = 200000;  // values collected for Auto at most
+
+// Band-0 values of the loaded tiles of the variable's current dimension slice (D-48), for the Auto range.
+// Same tile cache as sampleLayer (no store I/O): only tiles whose `key` is the source's current key (D-41) and
+// only the highest loaded zoom among them, every world copy included. Gutter and alpha as in sampleLayer
+// (last band when there are several, 0 = nodata); non-finite values are skipped. A common 2-D stride keeps
+// at most ~AUTO_MAX values. Returns a Float64Array (empty when nothing is loaded).
+function frameValues(name) {
+  const vl = state.vlayers.get(name);
+  const tiles = [];
+  let z = -1;
+  if (vl) vl.layers.forEach((layer, i) => {
+    const cache = layer.getRenderer?.()?.tileRepresentationCache;
+    if (!cache) return;
+    const key = vl.sources[i].getKey();
+    cache.forEach((rep) => {
+      const tile = rep && rep.loaded && rep.tile;
+      if (!tile || tile.key !== key || tile.getState() !== 2) return;  // 2 = TileState.LOADED
+      const tz = tile.tileCoord[0];
+      if (tz > z) { z = tz; tiles.length = 0; }
+      if (tz === z) tiles.push({tile, g: rep.gutter || 0});
+    });
+  });
+  let total = 0;
+  for (const t of tiles) { const [w, h] = t.tile.getSize(); total += w * h; }
+  const step = Math.max(1, Math.ceil(Math.sqrt(total / AUTO_MAX)));
+  const out = new Float64Array(tiles.reduce((n, t) => {
+    const [w, h] = t.tile.getSize();
+    return n + Math.ceil(w / step) * Math.ceil(h / step);
+  }, 0));
+  let n = 0;
+  for (const {tile, g} of tiles) {
+    const data = tile.getData();
+    const [w, h] = tile.getSize();
+    if (!data || !data.length) continue;
+    const bands = Math.max(1, Math.round(data.length / ((w + 2 * g) * (h + 2 * g))));
+    for (let row = 0; row < h; row += step) {
+      for (let col = 0; col < w; col += step) {
+        const px = ((row + g) * (w + 2 * g) + col + g) * bands;
+        if (bands > 1 && !data[px + bands - 1]) continue;
+        const val = data[px];
+        if (Number.isFinite(val)) out[n++] = val;
+      }
+    }
+  }
+  return out.subarray(0, n);
+}
+
+// {vmin, vmax} from the 2nd and 98th percentiles (linear interpolation, as the default limits, D-43), or null
+// without finite values. Mirrored to [-m, m] when lo < 0 < hi and the smaller magnitude is at least half the
+// larger; vmax = vmin + 1 when the range is empty.
+function autoRange(values) {
+  const v = Float64Array.from(Array.from(values).filter(Number.isFinite)).sort();
+  if (!v.length) return null;
+  const pct = (p) => {
+    const x = p * (v.length - 1), i = Math.floor(x);
+    return i + 1 < v.length ? v[i] + (v[i + 1] - v[i]) * (x - i) : v[i];
+  };
+  let lo = pct(0.02), hi = pct(0.98);
+  const a = Math.abs(lo), b = Math.abs(hi);
+  if (lo < 0 && hi > 0 && Math.min(a, b) / Math.max(a, b) >= 0.5) { hi = Math.max(a, b); lo = -hi; }
+  if (!(hi > lo)) hi = lo + 1;
+  return {vmin: lo, vmax: hi};
+}
+
 function buildStyleControls(v, opts, entry) {
   const st = styleOf(v);
   const mkRow = (label) => {
@@ -1146,12 +1214,13 @@ function buildStyleControls(v, opts, entry) {
   const minIn = h('input'), maxIn = h('input');
   for (const [inp, name] of [[minIn, 'Min'], [maxIn, 'Max']]) {
     inp.type = 'number'; inp.step = 'any'; inp.setAttribute('aria-label', name);
-    mkRow(name).append(inp);
   }
+  mkRow('Range').append(minIn, h('span', 'sep', '\u2013'), maxIn);
   const btnRow = mkRow('');
-  const symBtn = h('button', 'btn', 'Symmetric \u00b1'), resetBtn = h('button', 'btn', 'Reset');
-  symBtn.type = resetBtn.type = 'button';
-  btnRow.append(symBtn, resetBtn);
+  const autoBtn = h('button', 'btn', 'Auto'), symBtn = h('button', 'btn', 'Symmetric \u00b1'), resetBtn = h('button', 'btn', 'Reset');
+  autoBtn.type = symBtn.type = resetBtn.type = 'button';
+  autoBtn.title = AUTO_TITLE;
+  btnRow.append(autoBtn, symBtn, resetBtn);
 
   const sync = () => {
     const s = styleOf(v);
@@ -1171,12 +1240,15 @@ function buildStyleControls(v, opts, entry) {
     const vl = state.vlayers.get(v.name);
     if (vl) for (const l of vl.layers) l.setStyle({color: colorExpr(v)});
   };
+  const flashBad = () => {
+    for (const i of [minIn, maxIn]) i.classList.add('bad');
+    setTimeout(() => { minIn.classList.remove('bad'); maxIn.classList.remove('bad'); }, 1500);
+  };
   const setRange = () => {
     const a = parseFloat(minIn.value), b = parseFloat(maxIn.value);
     if (!Number.isFinite(a) || !Number.isFinite(b) || a >= b) {
-      for (const i of [minIn, maxIn]) i.classList.add('bad');
       sync();  // keep the old values
-      setTimeout(() => { minIn.classList.remove('bad'); maxIn.classList.remove('bad'); }, 1500);
+      flashBad();
       return;
     }
     styleOf(v).vmin = a; styleOf(v).vmax = b;
@@ -1186,6 +1258,17 @@ function buildStyleControls(v, opts, entry) {
   rev.addEventListener('change', () => { styleOf(v).reversed = rev.checked; apply(false); });
   minIn.addEventListener('change', setRange);
   maxIn.addEventListener('change', setRange);
+  autoBtn.addEventListener('click', () => {
+    const r = autoRange(frameValues(v.name));
+    if (!r) {  // nothing loaded for the current slice: keep the style
+      autoBtn.title = AUTO_NONE;
+      flashBad();
+      return;
+    }
+    autoBtn.title = AUTO_TITLE;
+    styleOf(v).vmin = r.vmin; styleOf(v).vmax = r.vmax;
+    apply(false);
+  });
   symBtn.addEventListener('click', () => {
     const s = styleOf(v);
     const m = Math.max(Math.abs(s.vmin), Math.abs(s.vmax));

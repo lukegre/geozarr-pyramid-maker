@@ -1850,3 +1850,35 @@ def test_viewer_uses_array_names():
     assert ".card.selected.open .opts" in html
     assert "params.get('var') === ''" in html
     assert "q.set('hidden', hidden.join(','))" in html
+
+
+def test_template_range_row_and_auto_button(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "mkRow('Range').append(minIn, h('span', 'sep', '\\u2013'), maxIn);" in html
+    assert "mkRow(name).append(inp);" not in html
+    assert "const autoBtn = h('button', 'btn', 'Auto')" in html
+    assert "btnRow.append(autoBtn, symBtn, resetBtn);" in html
+    assert "autoRange(frameValues(v.name))" in html
+    assert "No loaded data for the current frame" in html
+
+
+def test_viewer_auto_range_behaviour():
+    """Run autoRange and frameValues against fake renderer tile caches."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_range.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
