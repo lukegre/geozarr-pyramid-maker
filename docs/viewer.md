@@ -19,6 +19,12 @@ to Other. Expand settings to see the long name when available (the array name wh
 it between sections. The map follows the selected card order. All cards can be removed. Other remains visible as a
 drop target even when it is empty or collapsed. Visibility is preserved in shared URLs with `hidden=a,b`.
 
+In a card's settings the colour limits are one **Range** row (min and max). **Auto** sets them from the data of the
+current frame (2nd to 98th percentile of the loaded tiles; symmetric around zero when both signs are present and
+balanced), **Symmetric ±** mirrors the current limits and **Reset** returns to the defaults. Auto uses the tiles loaded
+for the current dimension slice, so the result can change with the viewport; with nothing loaded it leaves the range
+alone.
+
 ## Global settings
 
 The block at the bottom of the sidebar starts with **Global settings**. **Label by** chooses how variables are named
