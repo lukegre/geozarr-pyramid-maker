@@ -21,7 +21,8 @@ drop target even when it is empty or collapsed. Visibility is preserved in share
 
 In a card's settings the colour limits are one **Range** row (min and max). **Auto** sets them from the data of the
 current frame (2nd to 98th percentile of the loaded tiles; symmetric around zero when both signs are present and
-balanced), **Symmetric ±** mirrors the current limits and **Reset** returns to the defaults. Auto uses the tiles loaded
+balanced, in which case a non-diverging colourmap is switched to RdBu reversed and a diverging one is kept) and
+**Symmetric ±** mirrors the current limits. Auto uses the tiles loaded
 for the current dimension slice, so the result can change with the viewport; with nothing loaded it leaves the range
 alone.
 
@@ -59,7 +60,7 @@ da.geozarr.to_pyramid("sst.zarr")
 `_r` suffix such as `viridis_r` selects the map with **Reversed** switched on. `vmin` and `vmax` replace the default
 2-98 % percentile limits and can be set independently; if both are given and `vmax <= vmin`, both are ignored.
 Unknown colourmap names fall back to viridis with a warning, and categorical variables ignore all three attrs.
-Settings from the URL or stored in the browser take precedence, and **Reset** in a card's settings returns to the attrs.
+Settings from the URL or stored in the browser take precedence.
 
 ## URL parameters
 
