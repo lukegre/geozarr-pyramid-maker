@@ -183,6 +183,48 @@ def _iso(values: np.ndarray) -> list[str] | None:
     return None
 
 
+def _real(value: Any) -> float | None:
+    """``value`` as a finite float if it is a real number (not a bool or string), else None."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.number)):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):  # e.g. complex
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _attr_cmap(attrs: dict[str, Any], name: str = "") -> tuple[str, bool]:
+    """Colourmap ``(name, reversed)`` from the ``cmap`` attr (D-43), viridis if unset or unknown.
+
+    ``viridis_r`` is the base map plus the viewer's Reversed flag; an exact key (``RdBu_r``) wins.
+    """
+    raw = attrs.get("cmap")
+    if raw is None:
+        return "viridis", False
+    cmap = str(raw).strip()
+    if cmap in COLORMAPS:
+        return cmap, False
+    if cmap.endswith("_r") and cmap[:-2] in COLORMAPS:
+        return cmap[:-2], True
+    logger.warning(f"{name or 'variable'}: unknown cmap {raw!r}, using viridis")
+    return "viridis", False
+
+
+def _attr_limits(
+    attrs: dict[str, Any], vmin: float, vmax: float, name: str = ""
+) -> tuple[float, float]:
+    """Apply the ``vmin``/``vmax`` attrs (D-43) over the computed limits, keeping vmax > vmin."""
+    lo, hi = _real(attrs.get("vmin")), _real(attrs.get("vmax"))
+    if lo is not None and hi is not None and hi <= lo:
+        logger.warning(f"{name or 'variable'}: vmax <= vmin in attrs ({lo} >= {hi}), ignoring both")
+        lo = hi = None
+    vmin, vmax = (vmin if lo is None else lo), (vmax if hi is None else hi)
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+    return vmin, vmax
+
+
 def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, Any]:
     dims = list(arr.metadata.dimension_names or ())
     extra = [d for d in dims if d not in sdims]
@@ -218,14 +260,15 @@ def _variable_config(name: str, arr: zarr.Array, sdims: list[str]) -> dict[str, 
         cfg["vmin"] = _clean(uniq[0]) if uniq.size else 0.0
         cfg["vmax"] = _clean(uniq[-1]) if uniq.size else 1.0
         cfg["ticks"] = []
+        cfg["cmap"], cfg["reversed"] = "viridis", False  # categorical: palette, attrs ignored
     else:
         if valid.size:
             vmin, vmax = (float(v) for v in np.nanpercentile(valid, [2, 98]))
         else:
             vmin, vmax = 0.0, 1.0
-        if vmax <= vmin:
-            vmax = vmin + 1.0
+        vmin, vmax = _attr_limits(attrs, vmin, vmax, name)
         cfg["vmin"], cfg["vmax"] = _clean(vmin), _clean(vmax)
+        cfg["cmap"], cfg["reversed"] = _attr_cmap(attrs, name)
         cfg["ticks"] = _nice_ticks(cfg["vmin"], cfg["vmax"])
     return cfg
 
