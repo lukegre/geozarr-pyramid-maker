@@ -27,6 +27,11 @@ the colourmap is left alone) and **Symmetric** mirrors the current limits. Auto 
 for the current dimension slice, so the result can change with the viewport; with nothing loaded they leave the range
 alone.
 
+**Log scale** (next to **Reversed**) spaces the colours logarithmically, for positive data spanning decades such as
+chlorophyll. It needs a positive Min (the box is disabled otherwise and the map stays linear), the legend then shows
+1-2-5 ticks on a log axis, Auto and Min/Max ignore values of zero or below, and Symmetric is disabled. It is kept in the
+browser and in shared URLs as `log=1`.
+
 With the page focused (or the timeline), the left and right arrow keys step the horizontal dimension and the up and
 down arrow keys step the first vertical dimension (up goes to the previous index, down to the next one). On a focused
 vertical slider, up and down step that slider and left and right step the timeline. Keys with a modifier are left to the

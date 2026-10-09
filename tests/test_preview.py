@@ -1866,7 +1866,7 @@ def test_template_range_row_and_auto_button(tiny, tmp_path):
     assert "btnRow.append(autoBtn, symBtn);" not in html
     # Min/Max button: true extent of the current frame, no colourmap change (D-51)
     assert "Set the range to the minimum and maximum of the current frame" in html
-    assert "const e = frameExtent(v.name);" in html
+    assert "const e = frameExtent(v.name, !!styleOf(v).log);" in html
     assert "minMaxRange(e.min, e.max)" in html
     assert "resetBtn" not in html
     assert "h('button', 'btn', 'Reset')" not in html
@@ -1874,7 +1874,7 @@ def test_template_range_row_and_auto_button(tiny, tmp_path):
     assert "styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;" in html
     assert "if (r.symmetric)" in html
     assert "a diverging colourmap (RdBu, reversed) is used" in html
-    assert "autoRange(frameValues(v.name))" in html
+    assert "autoRange(frameValues(v.name), !!styleOf(v).log)" in html
     assert "No loaded data for the current frame" in html
 
 
@@ -1920,3 +1920,41 @@ def test_viewer_scrubber_arrow_keys_behaviour():
         capture_output=True,
         text=True,
     )
+
+
+def test_viewer_log_scale_behaviour():
+    """Run the log-scale code: colour stops, effectiveLog, ticks, legend, persistence, URL."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_log.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+            str(root / "src/geozarr_pyramid_maker/colormaps.json"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_template_log_scale_controls(tiny, tmp_path):
+    _, _, html = _generate(tiny, tmp_path)
+    assert "h('span', '', 'Log scale')" in html  # next to Reversed, in the same row
+    assert "Space the colours logarithmically (needs Min > 0)" in html
+    assert "function niceLogTicks" in html
+    assert "const effectiveLog" in html
+    assert "styleOf(v).log = logBox.checked" in html
+    assert "symBtn.disabled = effectiveLog(s)" in html
+    assert "autoRange(frameValues(v.name), !!styleOf(v).log)" in html
+    assert "frameExtent(v.name, !!styleOf(v).log)" in html
+    assert "cmap, rev, log, vmin, vmax" in html  # header comment lists the URL parameter
+    # the colourmap change keeps `log` (it only resets `reversed`)
+    assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html

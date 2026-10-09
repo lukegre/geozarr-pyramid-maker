@@ -16,8 +16,8 @@ const cmapGroups = [
 ];
 const context = vm.createContext({state, cmapGroups});
 vm.runInContext(html.slice(start, end), context);
-const autoRange = (v) => vm.runInContext('autoRange', context)(v);
-const frameExtent = (n) => vm.runInContext('frameExtent', context)(n);
+const autoRange = (v, positive) => vm.runInContext('autoRange', context)(v, positive);
+const frameExtent = (n, positive) => vm.runInContext('frameExtent', context)(n, positive);
 const minMaxRange = (a, b) => vm.runInContext('minMaxRange', context)(a, b);
 const frameValues = (n) => Array.from(vm.runInContext('frameValues', context)(n));
 const symmetricCmap = (c, r) => vm.runInContext('symmetricCmap', context)(c, r);
@@ -147,3 +147,16 @@ assert.equal(minMaxRange(NaN, 1), null);
 set('c', [layerWith([{tile: tile(0, K, new Float32Array([4, 4, 4, 4]))}])], [K]);
 const ce = frameExtent('c');
 assert.deepEqual({...minMaxRange(ce.min, ce.max)}, {vmin: 4, vmax: 5});
+
+// Log scale (D-52): with `positive` only values > 0 count, so the range stays positive; none left -> null.
+const mixed = [...Array(20).fill(-5), 0, ...Array.from({length: 100}, (_, i) => 1 + i)];  // 1..100 plus non-positive values
+r = autoRange(mixed, true);
+assert.ok(r.vmin > 0 && r.symmetric === false);
+near(r.vmin, 1 + 0.02 * 99); near(r.vmax, 100 - 0.02 * 99);
+assert.ok(autoRange(mixed).vmin < 0);  // without the flag nothing changes
+assert.equal(autoRange([-3, 0, -1], true), null);
+set('p', [layerWith([{tile: tile(0, K, new Float32Array([-4, 0, 3, 8]))}])], [K]);
+assert.deepEqual({...frameExtent('p', true)}, {min: 3, max: 8});
+assert.deepEqual({...frameExtent('p')}, {min: -4, max: 8});
+set('q', [layerWith([{tile: tile(0, K, new Float32Array([-4, 0, -1, 0]))}])], [K]);
+assert.equal(frameExtent('q', true), null);
