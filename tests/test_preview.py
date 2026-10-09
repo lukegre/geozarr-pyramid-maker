@@ -659,7 +659,15 @@ def test_template_colormap_select_tooltip(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     tip = "Tip: with this menu focused, press ← / → to step to the previous / next colourmap."
     assert f"sel.title = '{tip}';" in html
-    # native arrow-key stepping only: the select's single handler is the change event
+    # explicit ←/→ stepping (native is unreliable): keydown -> stepSelect -> bubbling change
+    assert "sel.addEventListener('keydown', (e) => stepSelect(sel, e));" in html
+    step = html.split("function stepSelect(sel, e) {", 1)[1].split("\nfunction setCmapShow", 1)[0]
+    assert "'ArrowLeft'" in step and "'ArrowRight'" in step
+    assert "e.preventDefault();" in step and "e.stopPropagation();" in step
+    assert "new Event('change', {bubbles: true})" in step
+    assert "e.altKey || e.ctrlKey || e.metaKey || e.shiftKey" in step
+    # the global ←/→ time-scrub handler leaves select targets alone
+    assert "closest('input, select, textarea, [contenteditable]')" in html
     assert "styleOf(v).cmap = sel.value; styleOf(v).reversed = false;" in html
 
 

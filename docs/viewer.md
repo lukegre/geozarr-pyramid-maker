@@ -27,7 +27,7 @@ diverging, cyclic, miscellaneous), plus the **cmocean** and **cmasher** collecti
 `cmocean: Diverging`). Three checkboxes in the sidebar footer under Dimensions, **matplotlib**, **cmocean** and
 **cmasher**, decide which of these are listed: matplotlib is on by default, the other two are off. A card keeps its current
 colourmap in the list even when its group is hidden, and styles from a shared URL render with any map regardless of
-the checkboxes. The choice is remembered in the browser. With a colourmap menu focused, the left and right arrow keys step to the previous and next colourmap (hover the menu for a tip).
+the checkboxes. The choice is remembered in the browser. With a colourmap menu focused, the left and right arrow keys step to the previous and next colourmap, handled explicitly by the viewer because browsers differ (hover the menu for a tip).
 
 ## URL parameters
 

@@ -30,6 +30,7 @@ function makeContext(extra = {}, kv = storage, blank = false) {
   return vm.createContext({
     cfg: {colormaps: data.colormaps, colormap_groups: data.groups, ramp: data.colormaps.viridis, title: 't'},
     blank, store, $: (id) => elements[id],
+    Event: class { constructor(type, init = {}) { this.type = type; this.bubbles = !!init.bubbles; } },
     document: {createElement: (tag) => element(tag)},
     Option: function (text, value) { return {tag: 'option', textContent: text, value}; },
     ...extra,
@@ -174,4 +175,79 @@ elements['cmap-matplotlib'].checked = false;
 elements['cmap-matplotlib'].handlers.change();
 run('fillCmapSelect')(fb, 'BrBG');
 assert.deepEqual(optionsOf(fb).map((o) => o.join(':')), ['Diverging:BrBG:BrBG']);
+
+// Arrow-key stepping (stepSelect): previous/next listed option across optgroups, clamped, modifiers ignored.
+run = load(makeContext({}, new Map()));  // fresh defaults: matplotlib groups listed
+const keySel = element('select');
+Object.defineProperty(keySel, 'options', {get: () => keySel.children.flatMap((og) => og.children)});
+const fired = [];
+keySel.dispatchEvent = (ev) => { fired.push(ev); };
+run('fillCmapSelect')(keySel, 'viridis');
+const keyOpts = values(keySel);
+const press = (key, mods = {}) => {
+  const ev = {key, ...mods, prevented: 0, stopped: 0, preventDefault() { this.prevented++; }, stopPropagation() { this.stopped++; }};
+  run('stepSelect')(keySel, ev);
+  return ev;
+};
+let ev = press('ArrowRight');
+assert.equal(keySel.value, keyOpts[1]);
+assert.equal(fired.length, 1);
+assert.equal(fired[0].type, 'change');
+assert.equal(fired[0].bubbles, true);
+assert.equal(ev.prevented, 1);
+assert.equal(ev.stopped, 1);
+press('ArrowLeft');
+assert.equal(keySel.value, keyOpts[0]);
+// clamp at the start: nothing changes and no event, but the key is still swallowed
+ev = press('ArrowLeft');
+assert.equal(keySel.value, keyOpts[0]);
+assert.equal(fired.length, 2);
+assert.equal(ev.prevented, 1);
+assert.equal(ev.stopped, 1);
+// across an optgroup boundary
+const firstGroup = keySel.children[0].children.length;
+keySel.value = keyOpts[firstGroup - 1];
+press('ArrowRight');
+assert.equal(keySel.value, keyOpts[firstGroup]);
+assert.notEqual(optionsOf(keySel)[firstGroup - 1][0], optionsOf(keySel)[firstGroup][0]);
+press('ArrowLeft');
+assert.equal(keySel.value, keyOpts[firstGroup - 1]);
+// clamp at the end
+keySel.value = keyOpts.at(-1);
+const before = fired.length;
+press('ArrowRight');
+assert.equal(keySel.value, keyOpts.at(-1));
+assert.equal(fired.length, before);
+// modifiers and other keys are ignored entirely
+keySel.value = keyOpts[3];
+for (const mods of [{ctrlKey: true}, {metaKey: true}, {altKey: true}, {shiftKey: true}]) {
+  ev = press('ArrowRight', mods);
+  assert.equal(keySel.value, keyOpts[3]);
+  assert.equal(ev.prevented + ev.stopped, 0);
+}
+for (const key of ['ArrowDown', 'ArrowUp', 'a']) {
+  ev = press(key);
+  assert.equal(keySel.value, keyOpts[3]);
+  assert.equal(ev.prevented + ev.stopped, 0);
+}
+assert.equal(fired.length, before);
+// Repeated presses keep stepping when `change` refills the select (apply -> sync -> fillCmapSelect rebuilds the options).
+let current = 'viridis';
+keySel.dispatchEvent = () => { current = keySel.value; run('fillCmapSelect')(keySel, current); };
+run('fillCmapSelect')(keySel, current);
+const start = values(keySel).indexOf('viridis');
+press('ArrowRight'); press('ArrowRight'); press('ArrowRight');
+assert.equal(keySel.value, values(keySel)[start + 3]);
+assert.equal(current, values(keySel)[start + 3]);
+press('ArrowLeft');
+assert.equal(keySel.value, values(keySel)[start + 2]);
+// A select listing only the current map (hidden groups) has nowhere to step.
+const lone = element('select');
+Object.defineProperty(lone, 'options', {get: () => lone.children.flatMap((og) => og.children)});
+lone.dispatchEvent = () => { throw new Error('unexpected change'); };
+elements['cmap-matplotlib'].checked = false;
+elements['cmap-matplotlib'].handlers.change();
+run('fillCmapSelect')(lone, 'viridis');
+run('stepSelect')(lone, {key: 'ArrowRight', preventDefault() {}, stopPropagation() {}});
+assert.equal(lone.value, 'viridis');
 console.log('ok');
