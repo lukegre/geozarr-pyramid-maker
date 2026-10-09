@@ -165,7 +165,8 @@ def test_view_promise_not_awaited(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     assert "await getView" not in html
     assert "getView(initial.sources[0]" in html
-    assert "state.vlayers.get(state.selected[0]) || makeLayers(cfg.variables[0])" in html
+    assert "state.vlayers.values().next().value || makeLayers(" in html
+    assert "varOf(state.selected[0]) || cfg.variables[0]" in html
 
 
 def test_missing_store(tmp_path):
@@ -1683,6 +1684,28 @@ def test_viewer_selection_drag_behaviour():
         [
             node,
             str(root / "tests/preview_selection.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_viewer_hidden_layers_are_not_loaded():
+    """Hidden selected variables hold no layers or sources; showing recreates them in order."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_hidden_layers.cjs"),
             str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
         ],
         check=True,
