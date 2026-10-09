@@ -1121,13 +1121,12 @@ function buildCards() {
 const AUTO_TITLE = 'Set the range from the data in the current frame (2\u201398 %). If the signs balance the range is symmetric and a diverging colourmap (RdBu, reversed) is used.';
 const AUTO_NONE = 'No loaded data for the current frame';
 const AUTO_MAX = 200000;  // values collected for Auto at most
+const MINMAX_TITLE = 'Set the range to the minimum and maximum of the current frame';
 
-// Band-0 values of the loaded tiles of the variable's current dimension slice (D-48), for the Auto range.
-// Same tile cache as sampleLayer (no store I/O): only tiles whose `key` is the source's current key (D-41) and
-// only the highest loaded zoom among them, every world copy included. Gutter and alpha as in sampleLayer
-// (last band when there are several, 0 = nodata); non-finite values are skipped. A common 2-D stride keeps
-// at most ~AUTO_MAX values. Returns a Float64Array (empty when nothing is loaded).
-function frameValues(name) {
+// Loaded tiles of the variable's current dimension slice (D-48), as [{tile, g}] with g the gutter. Same tile
+// cache as sampleLayer (no store I/O): only tiles whose `key` is the source's current key (D-41) and only the
+// highest loaded zoom among them, every world copy included. Shared by frameValues (Auto) and frameExtent (Min/Max).
+function frameTiles(name) {
   const vl = state.vlayers.get(name);
   const tiles = [];
   let z = -1;
@@ -1143,6 +1142,30 @@ function frameValues(name) {
       if (tz === z) tiles.push({tile, g: rep.gutter || 0});
     });
   });
+  return tiles;
+}
+
+// Calls fn(value) for the band-0 value of every `step`-th pixel (rows and columns) of one tile. Gutter and alpha as
+// in sampleLayer (last band when there are several, 0 = nodata); non-finite values are skipped.
+function scanTile({tile, g}, step, fn) {
+  const data = tile.getData();
+  const [w, h] = tile.getSize();
+  if (!data || !data.length) return;
+  const bands = Math.max(1, Math.round(data.length / ((w + 2 * g) * (h + 2 * g))));
+  for (let row = 0; row < h; row += step) {
+    for (let col = 0; col < w; col += step) {
+      const px = ((row + g) * (w + 2 * g) + col + g) * bands;
+      if (bands > 1 && !data[px + bands - 1]) continue;
+      const val = data[px];
+      if (Number.isFinite(val)) fn(val);
+    }
+  }
+}
+
+// Band-0 values of the loaded tiles of the current slice (frameTiles), for the Auto range. A common 2-D stride keeps
+// at most ~AUTO_MAX values. Returns a Float64Array (empty when nothing is loaded).
+function frameValues(name) {
+  const tiles = frameTiles(name);
   let total = 0;
   for (const t of tiles) { const [w, h] = t.tile.getSize(); total += w * h; }
   const step = Math.max(1, Math.ceil(Math.sqrt(total / AUTO_MAX)));
@@ -1151,21 +1174,22 @@ function frameValues(name) {
     return n + Math.ceil(w / step) * Math.ceil(h / step);
   }, 0));
   let n = 0;
-  for (const {tile, g} of tiles) {
-    const data = tile.getData();
-    const [w, h] = tile.getSize();
-    if (!data || !data.length) continue;
-    const bands = Math.max(1, Math.round(data.length / ((w + 2 * g) * (h + 2 * g))));
-    for (let row = 0; row < h; row += step) {
-      for (let col = 0; col < w; col += step) {
-        const px = ((row + g) * (w + 2 * g) + col + g) * bands;
-        if (bands > 1 && !data[px + bands - 1]) continue;
-        const val = data[px];
-        if (Number.isFinite(val)) out[n++] = val;
-      }
-    }
-  }
+  for (const t of tiles) scanTile(t, step, (val) => { out[n++] = val; });
   return out.subarray(0, n);
+}
+
+// {min, max} of every pixel of the loaded tiles of the current slice (D-51), or null without finite values.
+// Streams over the tiles with stride 1 (no subsampling, no copy), so the true extremes are found.
+function frameExtent(name) {
+  let min = Infinity, max = -Infinity;
+  for (const t of frameTiles(name)) scanTile(t, 1, (val) => { if (val < min) min = val; if (val > max) max = val; });
+  return min <= max ? {min, max} : null;
+}
+
+// {vmin, vmax} for the Min/Max button (D-51); vmax = vmin + 1 when the data is constant; null without finite limits.
+function minMaxRange(min, max) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return {vmin: min, vmax: max > min ? max : min + 1};
 }
 
 // Colourmap for a symmetric Auto range (D-49): a diverging map (any group labelled "... Diverging", so matplotlib,
@@ -1225,10 +1249,12 @@ function buildStyleControls(v, opts, entry) {
   }
   mkRow('Range').append(minIn, h('span', 'sep', ':'), maxIn);
   const btnRow = mkRow('');
-  const autoBtn = h('button', 'btn', 'Auto'), symBtn = h('button', 'btn', 'Symmetric \u00b1');
-  autoBtn.type = symBtn.type = 'button';
+  const autoBtn = h('button', 'btn', 'Auto'), minMaxBtn = h('button', 'btn', 'Min/Max');
+  const symBtn = h('button', 'btn', 'Symmetric');
+  autoBtn.type = minMaxBtn.type = symBtn.type = 'button';
   autoBtn.title = AUTO_TITLE;
-  btnRow.append(autoBtn, symBtn);
+  minMaxBtn.title = MINMAX_TITLE;
+  btnRow.append(autoBtn, minMaxBtn, symBtn);
 
   const sync = () => {
     const s = styleOf(v);
@@ -1279,6 +1305,18 @@ function buildStyleControls(v, opts, entry) {
       const sym = symmetricCmap(styleOf(v).cmap, styleOf(v).reversed);
       styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;
     }
+    apply(false);
+  });
+  minMaxBtn.addEventListener('click', () => {  // true extent of the current frame; colourmap untouched (D-51)
+    const e = frameExtent(v.name);
+    const r = e && minMaxRange(e.min, e.max);
+    if (!r) {
+      minMaxBtn.title = AUTO_NONE;
+      flashBad();
+      return;
+    }
+    minMaxBtn.title = MINMAX_TITLE;
+    styleOf(v).vmin = r.vmin; styleOf(v).vmax = r.vmax;
     apply(false);
   });
   symBtn.addEventListener('click', () => {

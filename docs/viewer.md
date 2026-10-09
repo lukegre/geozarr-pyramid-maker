@@ -22,8 +22,9 @@ drop target even when it is empty or collapsed. Visibility is preserved in share
 In a card's settings the colour limits are one **Range** row (min and max). **Auto** sets them from the data of the
 current frame (2nd to 98th percentile of the loaded tiles; symmetric around zero when both signs are present and
 balanced, in which case a non-diverging colourmap is switched to RdBu reversed and a diverging one is kept) and
-**Symmetric ±** mirrors the current limits. Auto uses the tiles loaded
-for the current dimension slice, so the result can change with the viewport; with nothing loaded it leaves the range
+**Min/Max** sets them to the true minimum and maximum of the current frame (every loaded pixel, no percentile clipping;
+the colourmap is left alone) and **Symmetric** mirrors the current limits. Auto and Min/Max use the tiles loaded
+for the current dimension slice, so the result can change with the viewport; with nothing loaded they leave the range
 alone.
 
 With the page focused (or the timeline), the left and right arrow keys step the horizontal dimension and the up and

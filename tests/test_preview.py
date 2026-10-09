@@ -634,7 +634,7 @@ def test_template_style_controls(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
     for token in (
         "setStyle(",
-        "Symmetric",
+        "h('button', 'btn', 'Symmetric')",
         "function niceTicks",
         "cfg.colormaps",
         "gpm-preview:style:",
@@ -642,6 +642,9 @@ def test_template_style_controls(tiny, tmp_path):
         "Reversed",
     ):
         assert token in html, token
+    # the label is just "Symmetric", without a plus-minus sign
+    assert "Symmetric \\u00b1" not in html
+    assert "Symmetric ±" not in html
     assert ".ol-attribution.ol-uncollapsible" in html  # OL's uncollapsible rule sets bottom:0
 
 
@@ -1858,7 +1861,13 @@ def test_template_range_row_and_auto_button(tiny, tmp_path):
     assert "\\u2013'), maxIn" not in html
     assert "mkRow(name).append(inp);" not in html
     assert "const autoBtn = h('button', 'btn', 'Auto')" in html
-    assert "btnRow.append(autoBtn, symBtn);" in html
+    assert "minMaxBtn = h('button', 'btn', 'Min/Max')" in html
+    assert "btnRow.append(autoBtn, minMaxBtn, symBtn);" in html
+    assert "btnRow.append(autoBtn, symBtn);" not in html
+    # Min/Max button: true extent of the current frame, no colourmap change (D-51)
+    assert "Set the range to the minimum and maximum of the current frame" in html
+    assert "const e = frameExtent(v.name);" in html
+    assert "minMaxRange(e.min, e.max)" in html
     assert "resetBtn" not in html
     assert "h('button', 'btn', 'Reset')" not in html
     # symmetric range -> diverging colourmap (D-49)
