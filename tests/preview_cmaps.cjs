@@ -250,4 +250,49 @@ elements['cmap-matplotlib'].handlers.change();
 run('fillCmapSelect')(lone, 'viridis');
 run('stepSelect')(lone, {key: 'ArrowRight', preventDefault() {}, stopPropagation() {}});
 assert.equal(lone.value, 'viridis');
+// Space on the focused colourmap menu (reverseKey, D-45): clicks the card's Reversed checkbox so the map, legend, URL and
+// storage follow its own change handler; the key is swallowed so the dropdown does not open and no shortcut fires.
+const makeRev = () => {
+  const rev = {checked: false, clicks: 0, changes: 0, focus() { throw new Error('focus must stay on the select'); }};
+  rev.click = () => { rev.clicks++; rev.checked = !rev.checked; rev.changes++; };
+  return rev;
+};
+const spaceEv = (extra = {}) => ({type: 'keydown', key: ' ', code: 'Space', prevented: 0, stopped: 0,
+  preventDefault() { this.prevented++; }, stopPropagation() { this.stopped++; }, ...extra});
+const rev = makeRev();
+let sev = spaceEv();
+run('reverseKey')(rev, sev);
+assert.equal(rev.checked, true);
+assert.equal(rev.changes, 1);
+assert.equal(sev.prevented, 1);
+assert.equal(sev.stopped, 1);
+run('reverseKey')(rev, spaceEv());
+assert.equal(rev.checked, false);  // toggles back
+assert.equal(rev.changes, 2);
+// key ' ' or code 'Space' alone is enough
+run('reverseKey')(rev, spaceEv({key: 'Spacebar'}));
+run('reverseKey')(rev, spaceEv({code: ''}));
+assert.equal(rev.changes, 4);
+// auto-repeat and keyup are swallowed without toggling again (keyup would otherwise open the list in some browsers)
+sev = spaceEv({repeat: true});
+run('reverseKey')(rev, sev);
+assert.equal(rev.changes, 4);
+assert.equal(sev.prevented, 1);
+sev = spaceEv({type: 'keyup'});
+run('reverseKey')(rev, sev);
+assert.equal(rev.changes, 4);
+assert.equal(sev.prevented, 1);
+assert.equal(sev.stopped, 1);
+// modifiers and other keys are untouched
+for (const mods of [{ctrlKey: true}, {metaKey: true}, {altKey: true}, {shiftKey: true}]) {
+  sev = spaceEv(mods);
+  run('reverseKey')(rev, sev);
+  assert.equal(sev.prevented + sev.stopped, 0);
+}
+for (const extra of [{key: 'Enter', code: 'Enter'}, {key: 'a', code: 'KeyA'}, {key: 'ArrowRight', code: 'ArrowRight'}]) {
+  sev = spaceEv(extra);
+  run('reverseKey')(rev, sev);
+  assert.equal(sev.prevented + sev.stopped, 0);
+}
+assert.equal(rev.changes, 4);
 console.log('ok');

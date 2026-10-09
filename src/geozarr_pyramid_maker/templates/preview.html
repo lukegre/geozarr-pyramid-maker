@@ -160,6 +160,8 @@
   .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
   #sbfoot { padding: 12px 16px; border-top: 1px solid var(--card-line); }
   #sbfoot label, #dimroles-title, #cmapmore-title { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  #gs-title { margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+  #labelrow { margin-bottom: 10px; }
   #lonrow, #dimroles, #cmapmore { margin-top: 10px; }
   #dimroles label.dimrow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp);
     margin-bottom: 4px; font-weight: 400; color: var(--text); }
@@ -273,6 +275,14 @@
     </section>
   </div>
   <div id="sbfoot">
+    <div id="gs-title">Global settings</div>
+    <div id="labelrow">
+      <label for="labelmode">Label by</label>
+      <select id="labelmode">
+        <option value="name">Array name</option>
+        <option value="long">Long name</option>
+      </select>
+    </div>
     <label for="basemap">Basemap</label>
     <select id="basemap"></select>
     <div id="dimroles" hidden>
@@ -624,6 +634,17 @@ function stepSelect(sel, e) {
   sel.value = opts[j].value;
   sel.dispatchEvent(new Event('change', {bubbles: true}));
 }
+// Space on a focused colourmap menu toggles the card's Reversed checkbox (D-45) by clicking it, so its change handler
+// updates the map, legend, URL and storage. keydown is swallowed so the list does not open and no global shortcut
+// fires; keyup and auto-repeat are swallowed too (some browsers open the list on keyup). An already open list is not
+// ours: there Space selects the highlighted option natively.
+function reverseKey(rev, e) {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.key !== ' ' && e.code !== 'Space') return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.type === 'keydown' && !e.repeat) rev.click();
+}
 function setCmapShow(source, on) {
   cmapShow[source] = on;
   store.set(CMAP_SHOW_KEYS[source], on ? '1' : '0');
@@ -638,6 +659,39 @@ function initCmapToggle() {
   }
 }
 initCmapToggle();
+// Label mode (D-44): variables are shown by array name or, when it has one, by long name (the LaTeX-cleaned
+// display_name). Kept in localStorage (in memory if that fails), not in the URL. `labelOf` is the only place that
+// decides a variable's label; `applyLabels` re-renders every place that shows one without rebuilding anything.
+const LABEL_KEY = 'gpm-preview:label-mode';
+let labelMode = store.get(LABEL_KEY) === 'long' ? 'long' : 'name';
+function labelOf(v) {
+  return labelMode === 'long' && v.long_name?.trim() ? (v.display_name || v.long_name) : v.name;
+}
+function applyLabels() {
+  for (const [name, c] of cards) {
+    const v = varOf(name);
+    c.title.textContent = labelOf(v);
+    c.handle.setAttribute('aria-label', `Drag ${labelOf(v)}`);
+    c.remove.setAttribute('aria-label', `Remove ${labelOf(v)} from Selected`);
+    // the settings line adds the other name: the long name in Array name mode, the array name in Long name mode
+    if (c.longname) c.longname.textContent = labelMode === 'long' ? v.name : (v.display_name || v.long_name);
+  }
+  refreshCards();  // eye icon titles
+  updateSpine();
+  const vars = $('info-vars');
+  if (vars) vars.textContent = cfg.variables.map(labelOf).join(', ');
+}
+function setLabelMode(mode) {
+  labelMode = mode === 'long' ? 'long' : 'name';
+  store.set(LABEL_KEY, labelMode);
+  applyLabels();
+}
+function initLabelMode() {
+  $('labelrow').hidden = blank;
+  const sel = $('labelmode');
+  sel.value = labelMode;
+  sel.addEventListener('change', () => setLabelMode(sel.value));
+}
 const styleKey = (v) => `gpm-preview:style:${cfg.title}:${v.name}`;
 // D-43: the variable's cmap (from the attrs): an exact key, else "<key>_r" = the key reversed, else viridis.
 // The server config already holds the resolved name; the in-browser loader passes the raw attr through.
@@ -947,7 +1001,7 @@ function buildCards() {
     handle.setAttribute('role', 'img');
     handle.draggable = true;
     handle.title = 'Drag to reorder or move between Selected and Other';
-    handle.setAttribute('aria-label', `Drag ${v.name}`);
+    handle.setAttribute('aria-label', `Drag ${labelOf(v)}`);
     handle.addEventListener('click', (e) => e.stopPropagation());
     handle.addEventListener('dragstart', (e) => {
       draggedVariable = v.name;
@@ -961,7 +1015,8 @@ function buildCards() {
       card.classList.remove('dragging');
       clearDragFeedback();
     });
-    top.append(handle, h('div', 'name', v.name));
+    const title = h('div', 'name', labelOf(v));
+    top.append(handle, title);
     const gear = h('button', 'iconbtn gear');
     gear.type = 'button';
     gear.innerHTML = ICON.gear;
@@ -973,7 +1028,7 @@ function buildCards() {
     const remove = h('button', 'iconbtn remove', '×');
     remove.type = 'button';
     remove.title = 'Remove from Selected';
-    remove.setAttribute('aria-label', `Remove ${v.name} from Selected`);
+    remove.setAttribute('aria-label', `Remove ${labelOf(v)} from Selected`);
     remove.addEventListener('click', (e) => { e.stopPropagation(); moveVariable(v.name, false); });
     top.append(visibility, gear, remove);
     card.append(top);
@@ -982,7 +1037,9 @@ function buildCards() {
     const legend = buildLegend(v);
     card.append(legend);
     const opts = h('div', 'opts');
-    if (v.long_name?.trim()) opts.append(h('div', 'longname', v.display_name || v.long_name));
+    const longname = v.long_name?.trim()
+      ? h('div', 'longname', labelMode === 'long' ? v.name : (v.display_name || v.long_name)) : null;
+    if (longname) opts.append(longname);
     const slider = h('input');
     slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 0.05; slider.value = opacityOf(v.name);
     slider.setAttribute('aria-label', 'Opacity');
@@ -990,7 +1047,7 @@ function buildCards() {
     const olab = h('label', '', 'Opacity');
     orow.append(olab, slider);
     opts.append(orow);
-    const entry = {el: card, gear, visibility, slider, legend, sync: null};
+    const entry = {el: card, gear, visibility, slider, legend, title, handle, remove, longname, sync: null};
     if (!v.categorical) entry.sync = buildStyleControls(v, opts, entry);
     opts.addEventListener('click', (e) => e.stopPropagation());
     card.append(opts);
@@ -1028,7 +1085,7 @@ function buildStyleControls(v, opts, entry) {
   const cmRow = mkRow('Colourmap');
   const sel = h('select');
   sel.setAttribute('aria-label', 'Colourmap');
-  sel.title = 'Tip: with this menu focused, press ← / → to step to the previous / next colourmap.';
+  sel.title = 'Tip: with this menu focused, press ← / → to step to the previous / next colourmap, or Space to toggle Reversed.';
   sel.addEventListener('keydown', (e) => stepSelect(sel, e));
   const fill = () => fillCmapSelect(sel, styleOf(v).cmap);
   cmapFills.add(fill);
@@ -1040,6 +1097,8 @@ function buildStyleControls(v, opts, entry) {
   rev.type = 'checkbox';
   revLab.append(rev, h('span', '', 'Reversed'));
   revRow.append(revLab);
+  sel.addEventListener('keydown', (e) => reverseKey(rev, e));
+  sel.addEventListener('keyup', (e) => reverseKey(rev, e));
   const minIn = h('input'), maxIn = h('input');
   for (const [inp, name] of [[minIn, 'Min'], [maxIn, 'Max']]) {
     inp.type = 'number'; inp.step = 'any'; inp.setAttribute('aria-label', name);
@@ -1115,7 +1174,7 @@ function refreshCards() {
     c.el.classList.toggle('selected', active);
     c.el.classList.toggle('active', visible);
     c.visibility.innerHTML = state.hidden.has(name) ? ICON.eyeOff : ICON.eye;
-    const action = `${visible ? 'Hide' : 'Show'} ${name}`;
+    const action = `${visible ? 'Hide' : 'Show'} ${labelOf(varOf(name))}`;
     c.visibility.title = action;
     c.visibility.setAttribute('aria-label', action);
     c.visibility.setAttribute('aria-pressed', String(visible));
@@ -1136,9 +1195,11 @@ function buildInfo() {
   const section = (title, rows) => {
     panel.append(h('h2', '', title));
     const tbl = h('table'), body = h('tbody');
-    for (const [k, v] of rows) {
+    for (const [k, v, id] of rows) {
       const tr = h('tr');
-      tr.append(h('th', '', k), h('td', '', String(v)));
+      const td = h('td', '', String(v));
+      if (id) td.id = id;
+      tr.append(h('th', '', k), td);
       body.append(tr);
     }
     tbl.append(body); panel.append(tbl);
@@ -1149,8 +1210,7 @@ function buildInfo() {
   rows.push(['CRS', cfg.crs.name]);
   if (cfg.bbox) rows.push(['Bbox', cfg.bbox.map((x) => +Number(x).toPrecision(7)).join(', ')]);
   if (!blank) {
-    const vars = cfg.variables.map((v) => v.name);
-    rows.push([`Variables (${vars.length})`, vars.join(', ')]);
+    rows.push([`Variables (${cfg.variables.length})`, cfg.variables.map(labelOf).join(', '), 'info-vars']);
     for (const [d, info] of Object.entries(cfg.dims || {})) rows.push([`Dimension ${d}`, `${info.size} steps`]);
     if (cfg.levels) rows.push(['Levels', cfg.levels]);
   }
@@ -1484,7 +1544,7 @@ function updateSpine() {
     $('sbspine').firstElementChild.replaceChildren(h('i', null, 'no store loaded'));
     return;
   }
-  const names = selVars().map((v) => v.name).join(', ');
+  const names = selVars().map((v) => labelOf(v)).join(', ');
   const span = $('sbspine').firstElementChild;
   span.replaceChildren(h('b', null, cfg.source || cfg.title), document.createTextNode(' \u00b7 '), h('i', null, names));
   $('sbspine').title = `${cfg.source || cfg.title} · ${names}`;
@@ -1660,7 +1720,7 @@ function initReadout(map) {
       if (val === null) continue;
       const v = varOf(name);
       const u = unitsOf(v);
-      lines.push(`${v.name}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
+      lines.push(`${labelOf(v)}: ${v.categorical ? String(val) : +Number(val).toPrecision(4)}${!v.categorical && u ? ` ${u}` : ''}`);
     }
     const coord = coordLine(map, e.coordinate, lines.length > 0);
     if (!lines.length && !coord) return hide();
@@ -1678,6 +1738,7 @@ function initReadout(map) {
 function init() {
   initStorePicker();
   initSidebar();
+  initLabelMode();
   updateSpine();
   $('sbspine').addEventListener('click', () => $('sbtoggle').click());
   buildInfo();
