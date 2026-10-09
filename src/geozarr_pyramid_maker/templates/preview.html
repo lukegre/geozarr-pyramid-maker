@@ -807,7 +807,7 @@ function colorExpr(v) {
 
 // selected: ordered variable names (stacking order, last = on top); vlayers: name -> {layers, sources}.
 const state = {selected: blank ? [] : [cfg.variables[0].name], dims: {}, roles: {}, opacity: {}, vlayers: new window.Map(),
-  map: null, scrub: null, scrubKey: null, timer: null, open: new Set(), hidden: new Set()};
+  map: null, scrub: null, vsteps: [], scrubKey: null, timer: null, open: new Set(), hidden: new Set()};
 const varOf = (name) => cfg.variables.find((v) => v.name === name);
 const selVars = () => state.selected.map(varOf);
 const opacityOf = (name) => (state.opacity[name] === undefined ? 1 : state.opacity[name]);
@@ -1479,6 +1479,7 @@ function buildDimRoles(dimNames) {
 function buildScrubber() {
   stopPlay();
   state.scrub = null;
+  state.vsteps = [];
   const dimNames = unionDims();
   state.scrubKey = dimNames.join('\u0000');
   syncRoles(dimNames);
@@ -1602,19 +1603,57 @@ function buildDimSlider(stack, name) {
   inp.type = 'range'; inp.min = 0; inp.max = ed.size - 1; inp.step = 1; inp.value = state.dims[name];
   inp.setAttribute('orient', 'vertical');
   inp.setAttribute('aria-label', name);
-  inp.addEventListener('input', () => { setDim(name, +inp.value); val.textContent = String(dimLabel(ed, +inp.value)); });
+  const apply = () => { setDim(name, +inp.value); val.textContent = String(dimLabel(ed, +inp.value)); };
+  inp.addEventListener('input', apply);
+  // Keyboard stepping (D-50): the same path as a native input event, clamped at both ends.
+  state.vsteps.push({name, step: (delta) => {
+    const i = clamp(+inp.value + delta, 0, ed.size - 1);
+    if (i === +inp.value) return;
+    inp.value = i;
+    apply();
+  }});
+  inp.addEventListener('keydown', (e) => dimKeyDown(e, name));
   item.append(h('span', 'lab', name), inp, val);
   stack.append(item);
 }
 
-document.addEventListener('keydown', (e) => {
-  if (!state.scrub || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+// Arrow keys across the scrubbers (D-50). Left/Right step the horizontal dim, Up/Down the first vertical dim
+// (Up = index - 1: the vertical slider has its minimum at the top). A key is only swallowed when it acts.
+function scrubKeyDown(e) {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (e.target && e.target.closest && e.target.closest('input, select, textarea, [contenteditable]')) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (!state.scrub) return;
+    e.preventDefault();
+    stopPlay();
+    state.scrub.step(e.key === 'ArrowRight' ? 1 : -1);
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    const v = state.vsteps[0];
+    if (!v) return;
+    e.preventDefault();
+    v.step(e.key === 'ArrowDown' ? 1 : -1);
+  }
+}
+
+// Focused vertical slider: Up/Down step that slider, Left/Right the horizontal scrubber. The native range
+// stepping and the global handler are skipped when it acts; Home/End/PageUp/PageDown stay native.
+function dimKeyDown(e, name) {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  let act;
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    const v = state.vsteps.find((x) => x.name === name);
+    if (!v) return;
+    act = () => v.step(e.key === 'ArrowDown' ? 1 : -1);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (!state.scrub) return;
+    act = () => { stopPlay(); state.scrub.step(e.key === 'ArrowRight' ? 1 : -1); };
+  } else return;
   e.preventDefault();
-  stopPlay();
-  state.scrub.step(e.key === 'ArrowRight' ? 1 : -1);
-});
+  e.stopPropagation();
+  act();
+}
+
+document.addEventListener('keydown', scrubKeyDown);
 
 // --------------------------------------------------------------------------- map
 
