@@ -1118,7 +1118,7 @@ function buildCards() {
   $('selhint').hidden = cfg.variables.length < 2;
 }
 
-const AUTO_TITLE = 'Set the range from the data in the current frame (2\u201398 %; symmetric if the signs balance)';
+const AUTO_TITLE = 'Set the range from the data in the current frame (2\u201398 %). If the signs balance the range is symmetric and a diverging colourmap (RdBu, reversed) is used.';
 const AUTO_NONE = 'No loaded data for the current frame';
 const AUTO_MAX = 200000;  // values collected for Auto at most
 
@@ -1168,9 +1168,16 @@ function frameValues(name) {
   return out.subarray(0, n);
 }
 
+// Colourmap for a symmetric Auto range (D-49): a diverging map (any group labelled "... Diverging", so matplotlib,
+// cmocean and cmasher) is kept with its Reversed state, every other map becomes RdBu reversed (red = high).
+function symmetricCmap(cmap, reversed) {
+  const diverging = cmapGroups.some((g) => /Diverging$/.test(g.label) && g.names.includes(cmap));
+  return diverging ? {cmap, reversed} : {cmap: 'RdBu', reversed: true};
+}
+
 // {vmin, vmax} from the 2nd and 98th percentiles (linear interpolation, as the default limits, D-43), or null
 // without finite values. Mirrored to [-m, m] when lo < 0 < hi and the smaller magnitude is at least half the
-// larger; vmax = vmin + 1 when the range is empty.
+// larger (`symmetric: true`); vmax = vmin + 1 when the range is empty.
 function autoRange(values) {
   const v = Float64Array.from(Array.from(values).filter(Number.isFinite)).sort();
   if (!v.length) return null;
@@ -1180,9 +1187,10 @@ function autoRange(values) {
   };
   let lo = pct(0.02), hi = pct(0.98);
   const a = Math.abs(lo), b = Math.abs(hi);
-  if (lo < 0 && hi > 0 && Math.min(a, b) / Math.max(a, b) >= 0.5) { hi = Math.max(a, b); lo = -hi; }
+  const symmetric = lo < 0 && hi > 0 && Math.min(a, b) / Math.max(a, b) >= 0.5;
+  if (symmetric) { hi = Math.max(a, b); lo = -hi; }
   if (!(hi > lo)) hi = lo + 1;
-  return {vmin: lo, vmax: hi};
+  return {vmin: lo, vmax: hi, symmetric};
 }
 
 function buildStyleControls(v, opts, entry) {
@@ -1215,12 +1223,12 @@ function buildStyleControls(v, opts, entry) {
   for (const [inp, name] of [[minIn, 'Min'], [maxIn, 'Max']]) {
     inp.type = 'number'; inp.step = 'any'; inp.setAttribute('aria-label', name);
   }
-  mkRow('Range').append(minIn, h('span', 'sep', '\u2013'), maxIn);
+  mkRow('Range').append(minIn, h('span', 'sep', ':'), maxIn);
   const btnRow = mkRow('');
-  const autoBtn = h('button', 'btn', 'Auto'), symBtn = h('button', 'btn', 'Symmetric \u00b1'), resetBtn = h('button', 'btn', 'Reset');
-  autoBtn.type = symBtn.type = resetBtn.type = 'button';
+  const autoBtn = h('button', 'btn', 'Auto'), symBtn = h('button', 'btn', 'Symmetric \u00b1');
+  autoBtn.type = symBtn.type = 'button';
   autoBtn.title = AUTO_TITLE;
-  btnRow.append(autoBtn, symBtn, resetBtn);
+  btnRow.append(autoBtn, symBtn);
 
   const sync = () => {
     const s = styleOf(v);
@@ -1267,6 +1275,10 @@ function buildStyleControls(v, opts, entry) {
     }
     autoBtn.title = AUTO_TITLE;
     styleOf(v).vmin = r.vmin; styleOf(v).vmax = r.vmax;
+    if (r.symmetric) {  // balanced signs: use a diverging colourmap unless the current one already is (D-49)
+      const sym = symmetricCmap(styleOf(v).cmap, styleOf(v).reversed);
+      styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;
+    }
     apply(false);
   });
   symBtn.addEventListener('click', () => {
@@ -1276,7 +1288,6 @@ function buildStyleControls(v, opts, entry) {
     s.vmin = -m; s.vmax = m;
     apply(false);
   });
-  resetBtn.addEventListener('click', () => { styles[v.name] = defaultStyle(v); apply(true); });
   sync();
   return sync;
 }

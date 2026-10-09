@@ -626,7 +626,8 @@ def test_template_plot_defaults_hooks(tiny, tmp_path):
     assert "if (!categorical) [vmin, vmax] = attrLimits(a, vmin, vmax, name);" in html
     assert "if (!categorical && a.cmap != null) v.cmap = String(a.cmap);" in html
     assert "defaultStyle = (v) => ({...resolveCmap(v), vmin: v.vmin, vmax: v.vmax})" in html
-    assert "styles[v.name] = defaultStyle(v)" in html  # Reset returns to the attrs-based defaults
+    assert "return defaultStyle(v);" in html  # initial style; the Reset button is gone (D-49)
+    assert "styles[v.name] = defaultStyle(v)" not in html
 
 
 def test_template_style_controls(tiny, tmp_path):
@@ -634,7 +635,6 @@ def test_template_style_controls(tiny, tmp_path):
     for token in (
         "setStyle(",
         "Symmetric",
-        "Reset",
         "function niceTicks",
         "cfg.colormaps",
         "gpm-preview:style:",
@@ -1854,10 +1854,17 @@ def test_viewer_uses_array_names():
 
 def test_template_range_row_and_auto_button(tiny, tmp_path):
     _, _, html = _generate(tiny, tmp_path)
-    assert "mkRow('Range').append(minIn, h('span', 'sep', '\\u2013'), maxIn);" in html
+    assert "mkRow('Range').append(minIn, h('span', 'sep', ':'), maxIn);" in html
+    assert "\\u2013'), maxIn" not in html
     assert "mkRow(name).append(inp);" not in html
     assert "const autoBtn = h('button', 'btn', 'Auto')" in html
-    assert "btnRow.append(autoBtn, symBtn, resetBtn);" in html
+    assert "btnRow.append(autoBtn, symBtn);" in html
+    assert "resetBtn" not in html
+    assert "h('button', 'btn', 'Reset')" not in html
+    # symmetric range -> diverging colourmap (D-49)
+    assert "styleOf(v).cmap = sym.cmap; styleOf(v).reversed = sym.reversed;" in html
+    assert "if (r.symmetric)" in html
+    assert "a diverging colourmap (RdBu, reversed) is used" in html
     assert "autoRange(frameValues(v.name))" in html
     assert "No loaded data for the current frame" in html
 
