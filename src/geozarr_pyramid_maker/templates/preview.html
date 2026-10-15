@@ -341,6 +341,22 @@ import OSM from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/source/OSM.js/+esm';
 import {register} from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/proj/proj4.js/+esm';
 import {toLonLat} from 'https://cdn.jsdelivr.net/npm/ol@10.10.0/proj.js/+esm';
 import proj4 from 'https://cdn.jsdelivr.net/npm/proj4@2.22.0/+esm';
+// Must be the zarrita version that ol@10.10.0's GeoZarr source imports, so this is the module instance OL uses.
+// S3 CORS rules that allow only GET leave HEAD responses without CORS headers, so zarrita's HEAD-before-suffix-read fails.
+import {FetchStore as OlFetchStore} from 'https://cdn.jsdelivr.net/npm/zarrita@0.7.3/+esm';
+
+// Serve suffix ranges (shard indexes) as one `Range: bytes=-N` GET instead of HEAD + explicit range. Idempotent.
+function noHeadSuffixReads(FetchStore) {
+  const proto = FetchStore.prototype;
+  if (proto.noHead) return;
+  const getRange = proto.getRange;
+  proto.getRange = function (key, range, opts) {
+    if (!('suffixLength' in range)) return getRange.call(this, key, range, opts);
+    return this.get(key, {...opts, headers: {...opts?.headers, Range: `bytes=-${range.suffixLength}`}});
+  };
+  proto.noHead = true;
+}
+noHeadSuffixReads(OlFetchStore);
 
 const $ = (id) => document.getElementById(id);
 
@@ -416,7 +432,8 @@ async function browserConfig(src, endpoint) {
     const names = [...new Set([...order, ...Object.keys(members).filter((n) => !n.includes('/'))])];
     if (!names.length) throw storeError('No array metadata is available.', 'Use a store with consolidated metadata or named variables.', 'invalid_pyramid');
     const zarr = await import('https://cdn.jsdelivr.net/npm/zarrita@0.7.5/+esm');
-    const zr = zarr.root(new zarr.FetchStore(url));
+    noHeadSuffixReads(zarr.FetchStore);
+    const zr = zarr.root(new zarr.FetchStore(url, {useSuffixRequest: true}));
     const variables = [], dims = {};
     for (const name of names) {
       const meta = members[name] || await metadata(`${level}/${name}`);

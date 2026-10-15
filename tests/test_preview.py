@@ -1761,6 +1761,35 @@ def test_viewer_variable_info_popover():
     )
 
 
+def test_viewer_suffix_reads_never_send_head():
+    """D-56: suffix reads are one GET with Range: bytes=-N (S3 CORS rules that allow only GET)."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute viewer interaction tests")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            node,
+            str(root / "tests/preview_suffix_range.cjs"),
+            str(root / "src/geozarr_pyramid_maker/templates/preview.html"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_viewer_zarrita_pin_matches_openlayers():
+    """D-56: zarrita patched for OL must match what ol@10.10.0 imports; change both together."""
+    html = pv.render_html(None)
+    assert "ol@10.10.0/source/GeoZarr.js/+esm" in html
+    assert "npm/zarrita@0.7.3/+esm" in html
+
+
 def test_viewer_hidden_layers_are_not_loaded():
     """Hidden selected variables hold no layers or sources; showing recreates them in order."""
     import shutil

@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/bin/geozarr-pyramid",
       "runtimeArgs": ["preview", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "viewer-static",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "http.server", "8770", "--directory", "src/geozarr_pyramid_maker/templates"],
+      "port": 8770
     }
   ]
 }
