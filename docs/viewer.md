@@ -103,6 +103,8 @@ Because the page runs in your browser, the store host must:
 - allow **CORS** for the viewer's origin (`https://lukegre.github.io`) when the store is on another origin, and
 - support **HTTP Range** requests (needed for sharded arrays).
 
+The viewer only needs `GET` and the `Range` header: it never sends `HEAD`, so a CORS rule that allows only `GET` is enough (D-56).
+
 Stores need GeoZarr v3 metadata with consolidated array metadata, or the variable-order attribute written by this
 package.
 
