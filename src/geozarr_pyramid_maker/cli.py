@@ -46,6 +46,14 @@ TileOpt = Annotated[
         "and/or repeatable var=pixels pairs.",
     ),
 ]
+KeepbitsOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--keepbits",
+        help="Bit rounding: mantissa bits kept (float32 0-23, float64 0-52) for all float "
+        "variables and/or repeatable var=bits pairs (default: no rounding).",
+    ),
+]
 LevelsOpt = Annotated[int | None, typer.Option("--max-levels", help="Maximum number of levels.")]
 ShardOpt = Annotated[
     list[str] | None,
@@ -216,6 +224,33 @@ def _parse_size_opts[T](
     return out
 
 
+def _keepbits(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"--keepbits: invalid value {value!r}; expected an integer.") from None
+
+
+def _parse_keepbits(values: list[str] | None) -> int | dict[str, int] | None:
+    """None without the flag; one bare int for all float variables, or var=bits pairs (D-60)."""
+    if not values:
+        return None
+    pairs = [v for v in values if "=" in v]
+    if pairs and len(pairs) != len(values):
+        raise ValueError("--keepbits: give either one default value or var=bits pairs, not both.")
+    if not pairs:
+        if len(values) > 1:
+            raise ValueError("--keepbits: give at most one default value.")
+        return _keepbits(values[0])
+    out: dict[str, int] = {}
+    for v in pairs:
+        name, _, text = v.rpartition("=")
+        if not name or not text:
+            raise ValueError(f"--keepbits: malformed pair {v!r}; expected var=bits.")
+        out[name] = _keepbits(text)
+    return out
+
+
 @app.command()
 def convert(
     input: Annotated[str, typer.Argument(metavar="IN", help="Input file, Zarr store or URL.")],
@@ -227,6 +262,7 @@ def convert(
     tile_size: TileOpt = None,
     max_levels: LevelsOpt = None,
     shard_size: ShardOpt = None,
+    keepbits: KeepbitsOpt = None,
     compression_level: Annotated[int, typer.Option("--compression-level")] = 3,
     overwrite: Annotated[
         bool, typer.Option("--overwrite", help="Replace an existing OUT.")
@@ -247,6 +283,7 @@ def convert(
             tile_size=_parse_size_opts(tile_size, names, "--tile-size", _tile, 512),
             max_levels=max_levels,
             shard_size=_parse_size_opts(shard_size, names, "--shard-size", _shard, None),
+            keepbits=_parse_keepbits(keepbits),
             compression_level=compression_level,
             overwrite=overwrite,
             validate=not no_validate,

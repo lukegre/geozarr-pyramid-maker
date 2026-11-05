@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
@@ -50,6 +50,7 @@ class PyramidPlan:
     levels: tuple[LevelPlan, ...]
     tile_size: Mapping[str, int]  # var -> tile edge in pixels
     shard_size: Mapping[str, Mapping[str, int] | None]  # var -> dim -> px, None = automatic
+    keepbits: Mapping[str, int] = field(default_factory=dict)  # var -> mantissa bits kept (D-60)
 
     def __repr__(self) -> str:
         return _format_plan(self)
@@ -306,6 +307,8 @@ def _format_plan(plan: PyramidPlan) -> str:
     ]
     for v in grid.variables:
         line = f"    {v.name}: {plan.resampling[v.name]}, {v.dtype}"
+        if v.name in plan.keepbits:
+            line += f", keepbits {plan.keepbits[v.name]}"
         if not uniform:
             line += (
                 f", tile {plan.tile_size[v.name]} px, shard {_shard_text(plan.shard_size[v.name])}"
