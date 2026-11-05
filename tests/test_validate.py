@@ -257,3 +257,13 @@ def test_integration_to_pyramid(tmp_path, polar_3031):
     to_pyramid(polar_3031, str(out), tile_size=64, validate=False)
     report = validate(str(out))
     assert is_valid(report), report
+
+
+def test_validate_group(tmp_path, tiny):
+    path = tmp_path / "g.zarr"
+    to_pyramid(tiny, str(path), group="maps", tile_size=32)
+    assert is_valid(validate(path, group="maps"))
+    assert is_valid(validate(path, group="/maps/"))
+    with pytest.raises(FileNotFoundError):
+        validate(path, group="nope")
+    assert not is_valid(validate(path))  # the root itself is not a pyramid

@@ -43,6 +43,7 @@ All keyword-only:
 | `max_levels` | Limit the number of pyramid levels |
 | `shard_size` | Shard shape in pixels: `None` (default, automatic, about 128 MiB), `n` (`n × n`), `{"time": 12, "y": 2048, "x": 2048}` (extra dims default to 1), or `{var: that}`; spatial values are rounded up to a multiple of the tile size; `-1` means the whole dim, and `"y"`/`"x"` are accepted for the spatial dims whatever they are called (D-59) |
 | `keepbits` | Bit rounding of float variables (D-60): mantissa bits kept, an int (all floats) or `{var: bits}`; 0-23 for float32, 0-52 for float64; default `None` (off). Applied to every level, NaN and fill values pass through, recorded as the variable attribute `bitround_keepbits`. Better compression, lossy; CLI: `--keepbits 8` or `--keepbits sst=8` |
+| `group` | Write the pyramid at `<store>/<group>` (nested `"a/b"` allowed) instead of the store root. Root attributes and sibling groups stay untouched; the existing-data check and `overwrite` apply to the group only. The group is consolidated, then the store root is re-consolidated so it lists the group (skipped with a warning if the root is not a zarr group); parallel writers to sibling groups must consolidate the root afterwards (D-62). `validate(store, group=...)`. CLI: `--group maps` on `convert` and `validate` |
 | `compression_level` | zstd level, default `3` |
 | `overwrite` | Default `False` |
 | `validate` | Validate the result, default `True` |

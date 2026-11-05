@@ -264,8 +264,12 @@ def convert(
     shard_size: ShardOpt = None,
     keepbits: KeepbitsOpt = None,
     compression_level: Annotated[int, typer.Option("--compression-level")] = 3,
+    group: Annotated[
+        str | None,
+        typer.Option("--group", help="Write the pyramid into this sub-group of OUT (D-62)."),
+    ] = None,
     overwrite: Annotated[
-        bool, typer.Option("--overwrite", help="Replace an existing OUT.")
+        bool, typer.Option("--overwrite", help="Replace an existing OUT (or just --group).")
     ] = False,
     no_validate: Annotated[bool, typer.Option("--no-validate", help="Skip validation.")] = False,
 ) -> None:
@@ -277,6 +281,7 @@ def convert(
         names = _data_var_names(ds)
         result = ds.geozarr.to_pyramid(
             output,
+            group=group,
             crs=crs,
             fill_values=_parse_fill_values(fill_value),
             resampling=method,
@@ -330,7 +335,12 @@ def plan(
 
 
 @app.command()
-def validate(store: Annotated[str, typer.Argument(help="GeoZarr store to validate.")]) -> None:
+def validate(
+    store: Annotated[str, typer.Argument(help="GeoZarr store to validate.")],
+    group: Annotated[
+        str | None, typer.Option("--group", help="Validate the pyramid in this sub-group.")
+    ] = None,
+) -> None:
     """Validate a GeoZarr pyramid; exit 0 if valid, 1 if not, 2 if missing."""
     from .validate import validate as _validate
 
@@ -338,7 +348,7 @@ def validate(store: Annotated[str, typer.Argument(help="GeoZarr store to validat
         typer.echo(f"Error: store {store!r} does not exist.", err=True)
         raise typer.Exit(2)
     with _clean_errors():
-        report: dict[str, Any] = _validate(store)
+        report: dict[str, Any] = _validate(store, group=group)
     bad = False
     for name, errs in report.items():
         if errs:
