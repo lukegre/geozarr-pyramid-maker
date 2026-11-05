@@ -47,8 +47,8 @@ class PyramidPlan:
     grid: GridInfo
     resampling: Mapping[str, str]  # var -> method
     levels: tuple[LevelPlan, ...]
-    tile_size: int
-    shard_size: int  # bytes
+    tile_size: Mapping[str, int]  # var -> tile edge in pixels
+    shard_size: Mapping[str, int]  # var -> target shard bytes
 
     def __repr__(self) -> str:
         return _format_plan(self)
@@ -91,19 +91,37 @@ def resolve_resampling(
     return out
 
 
+def _per_variable[T](
+    grid: GridInfo, value: T | Mapping[str, T], default: T, label: str
+) -> dict[str, T]:
+    """Expand a scalar or a partial mapping to one value per variable (D-57)."""
+    names = [v.name for v in grid.variables]
+    if not isinstance(value, Mapping):
+        return dict.fromkeys(names, value)
+    unknown = [k for k in value if k not in names]
+    if unknown:
+        raise ValueError(f"{label} has unknown variable(s) {unknown}; valid: {names}.")
+    return {n: value.get(n, default) for n in names}
+
+
 def build_plan(
     grid: GridInfo,
     *,
     resampling: str | Mapping[str, str] = "auto",
-    tile_size: int = 512,
+    tile_size: int | Mapping[str, int] = 512,
     max_levels: int | None = None,
-    shard_size: int | str = "128MiB",
+    shard_size: int | str | Mapping[str, int | str] = "128MiB",
 ) -> PyramidPlan:
-    if tile_size < 1:
-        raise ValueError(f"tile_size must be >= 1, got {tile_size}")
+    tiles = _per_variable(grid, tile_size, 512, "tile_size")
+    for name, t in tiles.items():
+        if t < 1:
+            raise ValueError(f"tile_size must be >= 1, got {t} for {name!r}")
     if max_levels is not None and max_levels < 1:
         raise ValueError(f"max_levels must be >= 1, got {max_levels}")
-    shard_bytes = parse_size(shard_size)
+    shards = {
+        n: parse_size(s) for n, s in _per_variable(grid, shard_size, "128MiB", "shard_size").items()
+    }
+    top_tile = min(tiles.values())
     methods = resolve_resampling(grid, resampling)
 
     extra = {v.name: tuple(v.shape[:-2]) for v in grid.variables}
@@ -125,13 +143,16 @@ def build_plan(
         )
         chunks = {
             name: choose_chunks(
-                level.var_shape(name), itemsize[name], tile_size=tile_size, shard_size=shard_bytes
+                level.var_shape(name),
+                itemsize[name],
+                tile_size=tiles[name],
+                shard_size=shards[name],
             )
             for name in extra
         }
         object.__setattr__(level, "chunks", chunks)
         levels.append(level)
-        if max(ny, nx) <= tile_size or (max_levels is not None and len(levels) >= max_levels):
+        if max(ny, nx) <= top_tile or (max_levels is not None and len(levels) >= max_levels):
             break
         ny, nx = math.ceil(ny / 2), math.ceil(nx / 2)
         k += 1
@@ -140,8 +161,8 @@ def build_plan(
         grid=grid,
         resampling=methods,
         levels=tuple(levels),
-        tile_size=tile_size,
-        shard_size=shard_bytes,
+        tile_size=tiles,
+        shard_size=shards,
     )
 
 
@@ -176,13 +197,25 @@ def _format_plan(plan: PyramidPlan) -> str:
     auth = crs.to_authority()
     crs_label = f"{auth[0]}:{auth[1]}" if auth else (f"EPSG:{epsg}" if epsg else crs.name)
     extra = ", ".join(f"{k}={v}" for k, v in grid.extra_dims.items()) or "none"
+    tiles, shards = set(plan.tile_size.values()), set(plan.shard_size.values())
+    uniform = len(tiles) <= 1 and len(shards) <= 1
+    if uniform:
+        sizes = f"tile: {tiles.pop()} px   shard target: {_fmt_size(shards.pop())}"
+    else:
+        sizes = "tile/shard: per variable"
     lines = [
         f"PyramidPlan: {len(plan.levels)} level(s), CRS {crs_label}",
         f"  dims: ({grid.y_dim}, {grid.x_dim})   extra dims: {extra}",
-        f"  tile: {plan.tile_size} px   shard target: {_fmt_size(plan.shard_size)}",
+        f"  {sizes}",
         "  variables:",
     ]
-    lines += [f"    {v.name}: {plan.resampling[v.name]}, {v.dtype}" for v in grid.variables]
+    for v in grid.variables:
+        line = f"    {v.name}: {plan.resampling[v.name]}, {v.dtype}"
+        if not uniform:
+            line += (
+                f", tile {plan.tile_size[v.name]} px, shard {_fmt_size(plan.shard_size[v.name])}"
+            )
+        lines.append(line)
     header = ("level", "shape", "resolution", "variable", "chunks", "shards", "size")
     rows: list[tuple[str, ...]] = []
     for lv in plan.levels:

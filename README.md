@@ -37,7 +37,7 @@ tree = xr.open_datatree("basal_melt.zarr", engine="zarr")  # levels "0" ... "N"
 ```
 
 `to_pyramid` options (all keyword-only): `crs`, `resampling` (`"auto"`, a method, or `{var: method}`; methods `mean`,
-`nearest`, `mode`, `min`, `max`), `tile_size=512`, `max_levels`, `shard_size="128MiB"`, `compression_level=3`,
+`nearest`, `mode`, `min`, `max`), `tile_size=512` and `shard_size="128MiB"` (each an int/size or a `{var: value}` mapping), `max_levels`, `compression_level=3`,
 `overwrite=False`, `validate=True`, `preview=False`, `storage_options`. Use `gpm.configure_logging("INFO")` to see progress.
 
 A full example on real data is in [`examples/oceansoda_dfco2.py`](examples/oceansoda_dfco2.py) and
@@ -90,7 +90,7 @@ out.zarr/                 zarr.json: zarr_conventions (multiscales, spatial:, pr
 - **Resampling (D-09, D-14, D-18)**: floats use `mean` (NaN-aware); ints, bools and CF flag variables use `mode`
   (2x2 block mode, ties to the top-left, fill ignored). dtype is preserved. The method is stored on each variable and in
   `multiscales` (`mean` is written as `average`, the spec term). Level k+1 is built from level k re-read from the store.
-- **Chunks and shards**: inner chunks are `tile_size` squares with 1 along every non-spatial dim. Shards are
+- **Chunks and shards**: inner chunks are `tile_size` squares (per variable if a mapping is given) with 1 along every non-spatial dim. Shards are
   power-of-2 multiples of tiles up to `shard_size` (extended along the leading extra dim, e.g. time, at coarse levels),
   none for levels with 4 chunks or fewer. Dask chunks equal shards, so parallel writes need no locks. Codec: zstd.
 - **GeoZarr conventions**: multiscales, `spatial:` and `proj:` attributes are built with `geozarr-toolkit` helpers,

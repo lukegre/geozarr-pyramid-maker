@@ -38,9 +38,9 @@ All keyword-only:
 |---|---|
 | `crs` | Override or supply the CRS of the source |
 | `resampling` | `"auto"`, a method, or `{var: method}`; methods `mean`, `nearest`, `mode`, `min`, `max` |
-| `tile_size` | Inner chunk size, default `512` |
+| `tile_size` | Inner chunk size, default `512`; an int, or `{var: size}` (unlisted variables keep the default) |
 | `max_levels` | Limit the number of pyramid levels |
-| `shard_size` | Maximum shard size, default `"128MiB"` |
+| `shard_size` | Maximum shard size, default `"128MiB"`; a size, or `{var: size}` |
 | `compression_level` | zstd level, default `3` |
 | `overwrite` | Default `False` |
 | `validate` | Validate the result, default `True` |
@@ -71,6 +71,7 @@ for the reversed map. See [Viewer](viewer.md#plot-defaults-from-attrs) for the r
 geozarr-pyramid plan input.nc
 geozarr-pyramid convert input.nc out.zarr --var melt --crs EPSG:3031 --tile-size 512 --overwrite
 geozarr-pyramid convert dfco2.zarr out.zarr --resampling mean          # or --resampling melt=mean --resampling mask=mode
+geozarr-pyramid convert in.nc out.zarr --tile-size 256 --tile-size mask=512 --shard-size melt=64MiB  # per variable
 geozarr-pyramid validate out.zarr
 geozarr-pyramid preview out.zarr --serve --port 8000
 geozarr-pyramid preview --demo                                          # blank-viewer server opened on a public MUR SST demo store (needs network)

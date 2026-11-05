@@ -54,9 +54,9 @@ to_pyramid(
     *,
     crs=None,                   # override auto-detection (anything pyproj.CRS accepts)
     resampling="auto",          # "auto" | method | {var: method}; methods: mean, nearest, mode, min, max
-    tile_size=512,              # inner chunk edge in px (the viewer tile size)
+    tile_size=512,              # inner chunk edge in px (the viewer tile size); int or {var: px} (D-57)
     max_levels=None,            # default: until the grid fits in one tile
-    shard_size="128MiB",        # target uncompressed shard size
+    shard_size="128MiB",        # target uncompressed shard size; size or {var: size} (D-57)
     compression_level=3,        # zstd
     overwrite=False,            # never delete existing data silently
     validate=True,
@@ -67,7 +67,7 @@ to_pyramid(
 
 CLI (typer), a thin wrapper over the same functions:
 ```
-geozarr-pyramid convert IN OUT [--var NAME ...] [--crs EPSG:3031] [--tile-size 512] [--overwrite]
+geozarr-pyramid convert IN OUT [--var NAME ...] [--crs EPSG:3031] [--tile-size 512 | --tile-size NAME=512 ...] [--overwrite]
 geozarr-pyramid plan IN
 geozarr-pyramid validate STORE
 geozarr-pyramid preview STORE [--serve] [--port 8000]
@@ -116,7 +116,7 @@ Because odd edges are padded rather than trimmed (§4.3), the origin never moves
 `PyramidPlan` is a frozen dataclass: CRS, dims, per-variable resampling, and a list of `LevelPlan`s
 (`shape`, `transform`, `bbox`, `chunks`, `shards`, `nbytes`). Its `__repr__` prints a table; `ds.geozarr.plan()` returns it.
 
-- **Number of levels**: keep halving until `max(ny, nx) <= tile_size` (at least 1 level). `max_levels` caps it.
+- **Number of levels**: keep halving until `max(ny, nx) <=` the smallest `tile_size` of any variable (at least 1 level). `max_levels` caps it.
 - **Level shape**: `ceil(n / 2)` at each step (padding).
 - **Level transform**: `a, e` ×2 per level; `c, f` (origin) unchanged.
 

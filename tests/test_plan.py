@@ -111,8 +111,8 @@ def test_antimeridian_levels(regional_antimeridian):
 def test_worked_example_utm(regional_utm):
     plan = _plan(regional_utm)
     assert [lv.shape for lv in plan.levels] == [(1001, 777), (501, 389)]
-    assert plan.tile_size == 512
-    assert plan.shard_size == 128 * 1024**2
+    assert set(plan.tile_size.values()) == {512}
+    assert set(plan.shard_size.values()) == {128 * 1024**2}
 
 
 # ------------------------------------------------------------------ resampling
@@ -247,8 +247,8 @@ def test_max_levels():
 
 def test_tile_size_and_shard_size_passthrough():
     plan = build_plan(_grid(1000, 1000), tile_size=256, shard_size="8MiB")
-    assert plan.tile_size == 256
-    assert plan.shard_size == 8 * 1024**2
+    assert set(plan.tile_size.values()) == {256}
+    assert set(plan.shard_size.values()) == {8 * 1024**2}
     assert [lv.shape for lv in plan.levels] == [(1000, 1000), (500, 500), (250, 250)]
     assert plan.levels[0].chunks["v"].chunks == (256, 256)
 
@@ -311,7 +311,7 @@ def test_accessor_dataset(polar_3031):
 def test_accessor_dataarray(regional_utm):
     plan = regional_utm["dem"].geozarr.plan(max_levels=1, tile_size=256)
     assert len(plan.levels) == 1
-    assert plan.tile_size == 256
+    assert set(plan.tile_size.values()) == {256}
     assert list(plan.resampling) == ["dem"]
 
 
@@ -364,3 +364,66 @@ def test_public_api():
         assert name in gpm.__all__
         assert hasattr(gpm, name)
     assert hasattr(xr.Dataset, "geozarr") and hasattr(xr.DataArray, "geozarr")
+
+
+# ------------------------------------------------------------------ per-variable sizes (D-57)
+
+
+def _two_vars(ny=1000, nx=1000):
+    return _grid(ny, nx, variables=(_var("a", shape=(ny, nx)), _var("b", shape=(ny, nx))))
+
+
+def test_scalar_sizes_resolve_to_mappings():
+    plan = build_plan(_two_vars(), tile_size=256, shard_size="1MiB")
+    assert plan.tile_size == {"a": 256, "b": 256}
+    assert plan.shard_size == {"a": 1024**2, "b": 1024**2}
+
+
+def test_mapping_sizes_per_variable_with_defaults():
+    plan = build_plan(_two_vars(), tile_size={"a": 128}, shard_size={"b": "1MiB"})
+    assert plan.tile_size == {"a": 128, "b": 512}
+    assert plan.shard_size == {"a": 128 * 1024**2, "b": 1024**2}
+    chunks = plan.levels[0].chunks
+    assert chunks["a"].chunks == (128, 128)
+    assert chunks["b"].chunks == (512, 512)
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [{"tile_size": {"nope": 64}}, {"shard_size": {"nope": "1MiB"}}],
+)
+def test_mapping_unknown_variable(kw):
+    with pytest.raises(ValueError, match="nope"):
+        build_plan(_two_vars(), **kw)
+
+
+def test_mapping_values_below_one():
+    with pytest.raises(ValueError, match="tile_size"):
+        build_plan(_two_vars(), tile_size={"a": 0})
+    with pytest.raises(ValueError):
+        build_plan(_two_vars(), shard_size={"a": 0})
+
+
+def test_levels_stop_at_smallest_tile():
+    plan = build_plan(_two_vars(1000, 1000), tile_size={"a": 100, "b": 400})
+    # 1000 -> 500 -> 250 -> 125 -> 63: stops once max(ny, nx) <= 100
+    assert [lv.shape[0] for lv in plan.levels] == [1000, 500, 250, 125, 63]
+    # the larger tile gets one clipped chunk at the top level
+    assert plan.levels[-1].chunks["b"].chunks == (63, 63)
+    assert plan.levels[-1].chunks["a"].chunks == (63, 63)
+    assert plan.levels[2].chunks["b"].chunks == (250, 250)
+
+
+def test_repr_uniform_header_and_lines():
+    text = repr(build_plan(_two_vars(), tile_size=256, shard_size="64MiB"))
+    assert "tile: 256 px   shard target: 64 MiB" in text
+    assert "per variable" not in text
+    assert "    a: mean, float32\n" in text
+
+
+def test_repr_mixed_per_variable():
+    text = repr(build_plan(_two_vars(), tile_size={"a": 256}, shard_size={"b": "64MiB"}))
+    assert "tile/shard: per variable" in text
+    assert "shard target" not in text
+    assert "    a: mean, float32, tile 256 px, shard 128 MiB" in text
+    assert "    b: mean, float32, tile 512 px, shard 64 MiB" in text

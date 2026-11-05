@@ -392,3 +392,21 @@ def test_info_log_is_concise_and_not_duplicated(multi_var, tmp_path):
     assert messages[-1].startswith("Pyramid written to ") and str(path) in messages[-1]
     assert not any(m.rstrip().endswith(".") for m in messages)
     print("\n".join(f"{lvl}: {m}" for lvl, m in records))
+
+
+def test_per_variable_tile_and_shard_on_disk(multi_var, tmp_path):
+    path = tmp_path / "o.zarr"
+    res = to_pyramid(
+        multi_var,
+        str(path),
+        tile_size={"melt": 16, "mask": 32},
+        shard_size={"melt": "4KiB"},
+        validate=False,
+    )
+    assert res.plan.tile_size == {"melt": 16, "mask": 32}
+    melt = zarr.open_array(LocalStore(path), path="0/melt", mode="r")
+    mask = zarr.open_array(LocalStore(path), path="0/mask", mode="r")
+    assert melt.chunks[-2:] == (16, 16) and melt.shards is not None
+    assert mask.chunks == (32, 32)
+    assert melt.shards != mask.shards
+    assert gpm.is_valid(gpm.validate(str(path)))
