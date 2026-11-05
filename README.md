@@ -37,7 +37,7 @@ tree = xr.open_datatree("basal_melt.zarr", engine="zarr")  # levels "0" ... "N"
 ```
 
 `to_pyramid` options (all keyword-only): `crs`, `fill_values` (a `{var: value}` nodata override, D-61), `resampling` (`"auto"`, a method, or `{var: method}`; methods `mean`,
-`nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable; `-1` means the whole dim, and `y`/`x` name the spatial dims whatever they are called), `keepbits=None` (bit rounding: mantissa bits kept for float variables, an int or `{var: bits}`, 0-23 for float32 and 0-52 for float64, applied at every level; NaN and fill values are untouched; recorded as the attribute `bitround_keepbits`), `max_levels`, `compression_level=3`, `group=None` (write the pyramid into a sub-group of the store, e.g. `"maps"` or `"a/b"`; the root and sibling groups are untouched, `overwrite` only replaces that group, D-62),
+`nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable; `-1` means the whole dim, and `y`/`x` name the spatial dims whatever they are called), `keepbits=None` (bit rounding: mantissa bits kept for float variables, an int or `{var: bits}`, 0-23 for float32 and 0-52 for float64, applied at every level; NaN and fill values are untouched; recorded as the attribute `bitround_keepbits`), `max_levels`, `compression_level=3`, `encoding_preset="default"` (`"web"` targets browser readers such as zarrita: Blosc zstd with bitshuffle (byte shuffle for ints) instead of plain zstd, decodes faster and smaller, and sharded arrays store inner chunks in C order so one time step is contiguous and a viewer's range requests coalesce, 32 to 8 requests per view in pamir-viewer; combine with `keepbits`, e.g. 10; `compression_level` must be 0-9; the write order is not stored in `zarr.json`, so re-opening an array and writing to it again falls back to Morton order; D-63), `group=None` (write the pyramid into a sub-group of the store, e.g. `"maps"` or `"a/b"`; the root and sibling groups are untouched, `overwrite` only replaces that group, D-62),
 `overwrite=False`, `validate=True`, `preview=False`, `storage_options`. Use `gpm.configure_logging("INFO")` to see progress.
 
 A full example on real data is in [`examples/oceansoda_dfco2.py`](examples/oceansoda_dfco2.py) and
@@ -49,6 +49,7 @@ A full example on real data is in [`examples/oceansoda_dfco2.py`](examples/ocean
 geozarr-pyramid plan input.nc
 geozarr-pyramid convert input.nc out.zarr --var melt --crs EPSG:3031 --tile-size 512 --overwrite
 geozarr-pyramid convert dfco2.zarr out.zarr --resampling mean          # or --resampling melt=mean --resampling mask=mode
+geozarr-pyramid convert in.nc out.zarr --preset web --keepbits 10       # blosc + C-order shards for browser viewers
 geozarr-pyramid validate out.zarr
 geozarr-pyramid preview out.zarr --serve --port 8000
 geozarr-pyramid preview --demo                                          # blank-viewer server opened on a public MUR SST demo store (needs network)
