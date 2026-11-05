@@ -99,6 +99,15 @@ def test_float_matches_reference(shape, method, nan):
     np.testing.assert_allclose(out.v.values, _ref(a, method, np.nan), equal_nan=True)
 
 
+@pytest.mark.parametrize(("method", "expected"), [("mean", 2.0), ("min", 1.0), ("max", 3.0)])
+def test_float_reductions_skip_nan(method, expected):
+    # Partial block -> reduction of the valid values; all-NaN block -> NaN.
+    a = np.array([[1.0, np.nan, np.nan, np.nan], [3.0, np.nan, np.nan, np.nan]])
+    out = _run(_ds(a), method, np.nan).v.values
+    assert out[0, 0] == expected
+    assert np.isnan(out[0, 1])
+
+
 @pytest.mark.parametrize("method", ["mean", "min", "max", "nearest", "mode"])
 @pytest.mark.parametrize("chunks", [{"y": 3, "x": 3}, {"y": 1, "x": 2}, {"y": 5, "x": 4}])
 def test_time_dim_and_odd_chunks(method, chunks):
