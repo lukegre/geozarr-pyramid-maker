@@ -7,7 +7,7 @@ import re
 import time
 import warnings
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ import zarr
 import zarr.abc.store
 import zarr.storage
 from loguru import logger
+from numcodecs import BitRound
 
 from .chunking import ChunkSpec
 from .detect import detect
@@ -206,6 +207,60 @@ def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -
             )
 
 
+# --------------------------------------------------------------------------- bit rounding
+
+
+def _resolve_keepbits(grid, keepbits: int | Mapping[str, int] | None) -> dict[str, int]:
+    """Per-variable keepbits for the float variables (D-60); raises before anything is written."""
+    if keepbits is None:
+        return {}
+    floats = {v.name: v.dtype for v in grid.variables if v.dtype in (np.float32, np.float64)}
+    if isinstance(keepbits, Mapping):
+        bad = [k for k in keepbits if k not in floats]
+        if bad:
+            raise ValueError(
+                f"keepbits names unknown or non-float variable(s) {bad}; float variables: "
+                f"{list(floats)}."
+            )
+        requested = dict(keepbits)
+    else:
+        requested = dict.fromkeys(floats, keepbits)
+        for v in grid.variables:
+            if v.name not in floats:
+                logger.debug("keepbits: skipping non-float variable {!r} ({})", v.name, v.dtype)
+    for name, n in requested.items():
+        top = 23 if floats[name] == np.float32 else 52
+        if isinstance(n, bool) or not isinstance(n, (int, np.integer)) or not 0 <= n <= top:
+            raise ValueError(
+                f"keepbits for {name!r} must be an integer in 0-{top} ({floats[name]}), got {n!r}."
+            )
+    return {k: int(n) for k, n in requested.items()}
+
+
+def _bitround(da: xr.DataArray, keepbits: int, fill: Any) -> xr.DataArray:
+    """Round-to-nearest to ``keepbits`` mantissa bits; NaN and the fill value pass through."""
+    codec = BitRound(keepbits=keepbits)
+    ftype = da.dtype
+
+    def _round(a):
+        a = np.ascontiguousarray(a, dtype=ftype)
+        r = codec.encode(a).view(ftype).reshape(a.shape)  # encode returns the bit pattern
+        keep = np.isnan(a) if fill is None or np.isnan(fill) else (np.isnan(a) | (a == fill))
+        return np.where(keep, a, r)
+
+    out = xr.apply_ufunc(_round, da, dask="parallelized", output_dtypes=[ftype], keep_attrs=True)
+    out.attrs["bitround_keepbits"] = keepbits
+    return out
+
+
+def _bitround_level(
+    ds: xr.Dataset, keepbits: Mapping[str, int], fills: Mapping[str, Any]
+) -> xr.Dataset:
+    if not keepbits:
+        return ds
+    return ds.assign({n: _bitround(ds[n], k, fills.get(n)) for n, k in keepbits.items()})
+
+
 def _fmt_size(n: float) -> str:
     for unit in ("B", "KiB", "MiB", "GiB"):
         if n < 1024 or unit == "GiB":
@@ -226,6 +281,7 @@ def to_pyramid(
     tile_size: int | Mapping[str, int] = 512,
     max_levels: int | None = None,
     shard_size: int | Mapping[str, Any] | None = None,
+    keepbits: int | Mapping[str, int] | None = None,
     compression_level: int = 3,
     overwrite: bool = False,
     validate: bool = True,
@@ -243,6 +299,7 @@ def to_pyramid(
         max_levels=max_levels,
         shard_size=shard_size,
     )
+    plan = replace(plan, keepbits=_resolve_keepbits(grid, keepbits))
     total = sum(lv.nbytes for lv in plan.levels)
     logger.info(
         "Pyramid plan: {} level(s), {} uncompressed in total", len(plan.levels), _fmt_size(total)
@@ -268,7 +325,7 @@ def to_pyramid(
     fills = {v.name: v.fill_value for v in grid.variables}
 
     t0 = time.perf_counter()
-    _write_level(ds, zstore, plan, 0, compression_level)
+    _write_level(_bitround_level(ds, plan.keepbits, fills), zstore, plan, 0, compression_level)
     timings["level_0"] = time.perf_counter() - t0
     logger.info(
         "Level 0 written: shape={} in {:.1f} s ({} uncompressed)",
@@ -301,6 +358,7 @@ def to_pyramid(
             fill_values=fills,
             steps=(plan.levels[k].transform[4], plan.levels[k].transform[0]),
         )
+        coarse = _bitround_level(coarse, plan.keepbits, fills)
         _write_level(coarse, zstore, plan, k + 1, compression_level)
         timings[f"level_{k + 1}"] = time.perf_counter() - t0
         logger.info(
