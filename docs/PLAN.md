@@ -57,7 +57,8 @@ to_pyramid(
     tile_size=512,              # inner chunk edge in px (the viewer tile size); int or {var: px} (D-57)
     max_levels=None,            # default: until the grid fits in one tile
     shard_size=None,            # None = automatic (~128 MiB); or px shape: int, {dim: px}, {var: ...} (D-58); -1 = whole dim, "y"/"x" alias spatial dims (D-59)
-    compression_level=3,        # zstd
+    compression_level=3,        # blosc level 0-9 (web preset), any zstd level with "zstd"
+    encoding_preset="web",      # "web" (blosc, C-order shards) | "zstd" (D-63)
     overwrite=False,            # never delete existing data silently
     validate=True,
     preview=False,
@@ -143,7 +144,7 @@ For each level and variable, with `itemsize` from the dtype:
 4. **No shard** when a level has 4 chunks or fewer (sharding would add nothing).
 5. **Dask chunks = shard shape** before writing. Each task writes whole shards, so parallel writes are safe with no locks, and
    each task holds about 64–128 MiB.
-6. Codec: `ZstdCodec(level=3)`. Coords are written unsharded, as a single chunk.
+6. Codec: by default Blosc (zstd, level 3, bitshuffle) with C-order shards (`encoding_preset="web"`, D-63); `"zstd"` gives `ZstdCodec(level=3)`. Coords are written unsharded, as a single chunk.
 
 ### 4.5 Metadata (`metadata.py`)
 Built with `geozarr-toolkit` models and helpers (`create_spatial_attrs`, `create_proj_attrs`,

@@ -28,7 +28,7 @@ from .resample import downsample
 _URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 _OBSTORE_SCHEMES = ("s3", "gs", "gcs", "az", "abfs", "memory")
 _CLOUD_HINT = "pip install geozarr-pyramid-maker[cloud]"
-_PRESETS = ("default", "web")
+_PRESETS = ("web", "zstd")
 
 
 @dataclass(frozen=True)
@@ -181,7 +181,7 @@ def _encoding(
     specs: Mapping[str, ChunkSpec],
     fills: Mapping[str, Any],
     compression_level: int,
-    encoding_preset: str = "default",
+    encoding_preset: str = "web",
     spatial_dims: tuple[str, str] | None = None,
 ):
     enc: dict[str, dict[str, Any]] = {}
@@ -190,7 +190,7 @@ def _encoding(
         spec = specs[name]
         if len(spec.chunks) != ds[name].ndim:
             raise ValueError(f"chunk spec {spec.chunks} does not match dims of {name!r}")
-        if encoding_preset == "web":
+        if encoding_preset != "zstd":
             # lexicographic order only keeps a time step contiguous if y, x are the last dims
             if spatial_dims is not None and tuple(ds[name].dims[-2:]) != spatial_dims:
                 raise RuntimeError(
@@ -240,7 +240,7 @@ def _write_level(
     k: int,
     compression_level: int,
     group: str = "",
-    encoding_preset: str = "default",
+    encoding_preset: str = "web",
 ) -> None:
     level = plan.levels[k]
     fills = {v.name: v.fill_value for v in plan.grid.variables}
@@ -356,7 +356,7 @@ def to_pyramid(
     shard_size: int | Mapping[str, Any] | None = None,
     keepbits: int | Mapping[str, int] | None = None,
     compression_level: int = 3,
-    encoding_preset: Literal["default", "web"] = "default",
+    encoding_preset: Literal["web", "zstd"] = "web",
     overwrite: bool = False,
     validate: bool = True,
     preview: bool = False,

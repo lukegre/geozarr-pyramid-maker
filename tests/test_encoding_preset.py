@@ -36,25 +36,6 @@ def _zjson(path, k=0, name="v"):
     return json.loads((path / str(k) / name / "zarr.json").read_text())
 
 
-def _tree(path):
-    return {
-        p.relative_to(path).as_posix(): p.read_bytes()
-        for p in sorted(path.rglob("*"))
-        if p.is_file()
-    }
-
-
-def _strip_history(raw):
-    """Parse zarr.json and drop every attributes.history (also inside consolidated metadata)."""
-
-    def walk(o):
-        if isinstance(o, dict):
-            return {k: walk(v) for k, v in o.items() if k != "history"}
-        return [walk(v) for v in o] if isinstance(o, list) else o
-
-    return walk(json.loads(raw))
-
-
 def _codecs(meta):
     return meta["codecs"]
 
@@ -69,20 +50,25 @@ def _shard_offsets(path, res, k=0):
     return [int(o) for o, _ in idx if o != 2**64 - 1]
 
 
-def test_default_preset_is_byte_identical(tmp_path):
+def test_zstd_preset_uses_zarr_sharding_with_zstd(tmp_path):
     ds = _make()
-    a, b = tmp_path / "a.zarr", tmp_path / "b.zarr"
-    to_pyramid(ds, str(a), tile_size=256, shard_size=SHARDS)
-    to_pyramid(ds, str(b), tile_size=256, shard_size=SHARDS, encoding_preset="default")
-    ta, tb = _tree(a), _tree(b)
-    assert ta.keys() == tb.keys()
-    for k in ta:
-        if k.endswith("zarr.json"):  # "history" carries a 1 s timestamp; ignore it
-            assert _strip_history(ta[k]) == _strip_history(tb[k]), k
-        else:
-            assert ta[k] == tb[k], k
-    names = json.dumps(_zjson(a)["codecs"])
-    assert "zstd" in names and "blosc" not in names
+    out = tmp_path / "z.zarr"
+    to_pyramid(ds, str(out), tile_size=256, shard_size=SHARDS, encoding_preset="zstd")
+    codecs = _codecs(_zjson(out))
+    assert len(codecs) == 1 and codecs[0]["name"] == "sharding_indexed"
+    assert [c["name"] for c in codecs[0]["configuration"]["codecs"]] == ["bytes", "zstd"]
+    assert "blosc" not in json.dumps(_zjson(out))
+    got = xr.open_zarr(out, group="0", consolidated=False)["v"].values
+    np.testing.assert_array_equal(got, ds.v.values)
+
+
+def test_omitted_preset_is_web(tmp_path):
+    ds = _make()
+    out = tmp_path / "d.zarr"
+    to_pyramid(ds, str(out), tile_size=256, shard_size=SHARDS)
+    codecs = _codecs(_zjson(out))
+    assert len(codecs) == 1 and codecs[0]["name"] == "sharding_indexed"
+    assert [c["name"] for c in codecs[0]["configuration"]["codecs"]] == ["bytes", "blosc"]
 
 
 def test_web_codecs_and_roundtrip(tmp_path):
@@ -107,8 +93,8 @@ def test_web_codecs_and_roundtrip(tmp_path):
 def test_web_shard_order_is_lexicographic(tmp_path):
     ds = _make()
     web, dflt = tmp_path / "w.zarr", tmp_path / "d.zarr"
-    rw = to_pyramid(ds, str(web), tile_size=256, shard_size=SHARDS, encoding_preset="web")
-    rd = to_pyramid(ds, str(dflt), tile_size=256, shard_size=SHARDS)
+    rw = to_pyramid(ds, str(web), tile_size=256, shard_size=SHARDS)
+    rd = to_pyramid(ds, str(dflt), tile_size=256, shard_size=SHARDS, encoding_preset="zstd")
     spec = rw.plan.levels[0].chunks["v"]
     assert spec.shards is not None and len(spec.chunks) == 3
     assert spec.shards[1] == spec.shards[2] == 512 and spec.chunks[1] == 256
@@ -158,9 +144,14 @@ def test_invalid_preset_and_level(tmp_path):
     ds = _make(n=64)
     with pytest.raises(ValueError, match="encoding_preset"):
         to_pyramid(ds, str(tmp_path / "a.zarr"), encoding_preset="fast")
+    with pytest.raises(ValueError, match="encoding_preset"):
+        to_pyramid(ds, str(tmp_path / "c.zarr"), encoding_preset="default")
     with pytest.raises(ValueError, match="compression_level"):
-        to_pyramid(ds, str(tmp_path / "b.zarr"), encoding_preset="web", compression_level=12)
+        to_pyramid(ds, str(tmp_path / "b.zarr"), compression_level=12)
+    # zstd allows levels above 9
+    to_pyramid(ds, str(tmp_path / "e.zarr"), encoding_preset="zstd", compression_level=12)
     assert not (tmp_path / "a.zarr").exists() and not (tmp_path / "b.zarr").exists()
+    assert not (tmp_path / "c.zarr").exists()
 
 
 def test_accessor_forwards_preset(tmp_path):

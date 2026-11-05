@@ -58,15 +58,16 @@ KeepbitsOpt = Annotated[
 
 
 class Preset(StrEnum):
-    default = "default"
     web = "web"
+    zstd = "zstd"
 
 
 PresetOpt = Annotated[
     Preset,
     typer.Option(
         "--preset",
-        help="Encoding preset: 'web' writes blosc inner chunks in C order for browser readers "
+        help="Encoding preset: 'web' (default) writes blosc inner chunks in C order for "
+        "browser readers; 'zstd' writes plain zstd chunks in zarr's Morton shard order "
         "(D-63).",
     ),
 ]
@@ -280,7 +281,7 @@ def convert(
     shard_size: ShardOpt = None,
     keepbits: KeepbitsOpt = None,
     compression_level: Annotated[int, typer.Option("--compression-level")] = 3,
-    preset: PresetOpt = Preset.default,
+    preset: PresetOpt = Preset.web,
     group: Annotated[
         str | None,
         typer.Option("--group", help="Write the pyramid into this sub-group of OUT (D-62)."),

@@ -44,8 +44,8 @@ All keyword-only:
 | `shard_size` | Shard shape in pixels: `None` (default, automatic, about 128 MiB), `n` (`n × n`), `{"time": 12, "y": 2048, "x": 2048}` (extra dims default to 1), or `{var: that}`; spatial values are rounded up to a multiple of the tile size; `-1` means the whole dim, and `"y"`/`"x"` are accepted for the spatial dims whatever they are called (D-59) |
 | `keepbits` | Bit rounding of float variables (D-60): mantissa bits kept, an int (all floats) or `{var: bits}`; 0-23 for float32, 0-52 for float64; default `None` (off). Applied to every level, NaN and fill values pass through, recorded as the variable attribute `bitround_keepbits`. Better compression, lossy; CLI: `--keepbits 8` or `--keepbits sst=8` |
 | `group` | Write the pyramid at `<store>/<group>` (nested `"a/b"` allowed) instead of the store root. Root attributes and sibling groups stay untouched; the existing-data check and `overwrite` apply to the group only. The group is consolidated, then the store root is re-consolidated so it lists the group (skipped with a warning if the root is not a zarr group); parallel writers to sibling groups must consolidate the root afterwards (D-62). `validate(store, group=...)`. CLI: `--group maps` on `convert` and `validate` |
-| `compression_level` | zstd level, default `3` (0-9 with `encoding_preset="web"`) |
-| `encoding_preset` | `"default"` (zstd, zarr's Morton shard order) or `"web"` (D-63) for browser readers: Blosc zstd with bitshuffle (byte shuffle for ints) decodes faster and smaller in zarrita, and inner chunks are stored in C order so one time step is contiguous in the shard and range requests coalesce (32 to 8 requests per view in pamir-viewer). Recommended with `keepbits=10`. The write order is not stored in `zarr.json`: re-opening an array and writing to it again falls back to Morton order. CLI: `--preset web` |
+| `compression_level` | default `3`; 0-9 (Blosc level) with the default `web` preset, any zstd level with `encoding_preset="zstd"` |
+| `encoding_preset` | `"web"` (default, D-63) for browser readers: Blosc zstd with bitshuffle (byte shuffle for ints) decodes faster and smaller in zarrita, and inner chunks are stored in C order so one time step is contiguous in the shard and range requests coalesce (32 to 8 requests per view in pamir-viewer). Recommended with `keepbits=10`. The write order is not stored in `zarr.json`: re-opening an array and writing to it again falls back to Morton order. `"zstd"` writes plain zstd chunks in zarr's Morton shard order and allows any zstd level. CLI: `--preset {web,zstd}` |
 | `overwrite` | Default `False` |
 | `validate` | Validate the result, default `True` |
 | `preview` | Also write a preview page, default `False` |
@@ -76,7 +76,8 @@ geozarr-pyramid plan input.nc
 geozarr-pyramid convert input.nc out.zarr --var melt --crs EPSG:3031 --tile-size 512 --overwrite
 geozarr-pyramid convert dfco2.zarr out.zarr --resampling mean          # or --resampling melt=mean --resampling mask=mode
 geozarr-pyramid convert in.nc out.zarr --tile-size 256 --tile-size mask=512 --shard-size melt=time:12,y:2048,x:2048  # per variable; shard shapes in pixels
-geozarr-pyramid convert in.nc out.zarr --preset web --keepbits 10  # blosc + C-order shards for browser viewers
+geozarr-pyramid convert in.nc out.zarr --keepbits 10  # web preset (blosc + C-order shards) is the default
+geozarr-pyramid convert in.nc out.zarr --preset zstd  # plain zstd
 geozarr-pyramid validate out.zarr
 geozarr-pyramid preview out.zarr --serve --port 8000
 geozarr-pyramid preview --demo                                          # blank-viewer server opened on a public MUR SST demo store (needs network)

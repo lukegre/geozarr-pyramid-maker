@@ -37,7 +37,7 @@ tree = xr.open_datatree("basal_melt.zarr", engine="zarr")  # levels "0" ... "N"
 ```
 
 `to_pyramid` options (all keyword-only): `crs`, `fill_values` (a `{var: value}` nodata override, D-61), `resampling` (`"auto"`, a method, or `{var: method}`; methods `mean`,
-`nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable; `-1` means the whole dim, and `y`/`x` name the spatial dims whatever they are called), `keepbits=None` (bit rounding: mantissa bits kept for float variables, an int or `{var: bits}`, 0-23 for float32 and 0-52 for float64, applied at every level; NaN and fill values are untouched; recorded as the attribute `bitround_keepbits`), `max_levels`, `compression_level=3`, `encoding_preset="default"` (`"web"` targets browser readers such as zarrita: Blosc zstd with bitshuffle (byte shuffle for ints) instead of plain zstd, decodes faster and smaller, and sharded arrays store inner chunks in C order so one time step is contiguous and a viewer's range requests coalesce, 32 to 8 requests per view in pamir-viewer; combine with `keepbits`, e.g. 10; `compression_level` must be 0-9; the write order is not stored in `zarr.json`, so re-opening an array and writing to it again falls back to Morton order; D-63), `group=None` (write the pyramid into a sub-group of the store, e.g. `"maps"` or `"a/b"`; the root and sibling groups are untouched, `overwrite` only replaces that group, D-62),
+`nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable; `-1` means the whole dim, and `y`/`x` name the spatial dims whatever they are called), `keepbits=None` (bit rounding: mantissa bits kept for float variables, an int or `{var: bits}`, 0-23 for float32 and 0-52 for float64, applied at every level; NaN and fill values are untouched; recorded as the attribute `bitround_keepbits`), `max_levels`, `compression_level=3` (0-9 by default, Blosc level; any zstd level with `encoding_preset="zstd"`), `encoding_preset="web"` (default; targets browser readers such as zarrita: Blosc zstd with bitshuffle (byte shuffle for ints), decodes faster and smaller, and sharded arrays store inner chunks in C order so one time step is contiguous and a viewer's range requests coalesce, 32 to 8 requests per view in pamir-viewer; combine with `keepbits`, e.g. 10; the write order is not stored in `zarr.json`, so re-opening an array and writing to it again falls back to Morton order; `"zstd"` writes plain zstd chunks in zarr's Morton shard order and allows any zstd level; D-63), `group=None` (write the pyramid into a sub-group of the store, e.g. `"maps"` or `"a/b"`; the root and sibling groups are untouched, `overwrite` only replaces that group, D-62),
 `overwrite=False`, `validate=True`, `preview=False`, `storage_options`. Use `gpm.configure_logging("INFO")` to see progress.
 
 A full example on real data is in [`examples/oceansoda_dfco2.py`](examples/oceansoda_dfco2.py) and
@@ -49,7 +49,8 @@ A full example on real data is in [`examples/oceansoda_dfco2.py`](examples/ocean
 geozarr-pyramid plan input.nc
 geozarr-pyramid convert input.nc out.zarr --var melt --crs EPSG:3031 --tile-size 512 --overwrite
 geozarr-pyramid convert dfco2.zarr out.zarr --resampling mean          # or --resampling melt=mean --resampling mask=mode
-geozarr-pyramid convert in.nc out.zarr --preset web --keepbits 10       # blosc + C-order shards for browser viewers
+geozarr-pyramid convert in.nc out.zarr --keepbits 10                  # web preset (blosc, C-order shards) is the default
+geozarr-pyramid convert in.nc out.zarr --preset zstd                 # plain zstd, zarr's Morton shard order
 geozarr-pyramid validate out.zarr
 geozarr-pyramid preview out.zarr --serve --port 8000
 geozarr-pyramid preview --demo                                          # blank-viewer server opened on a public MUR SST demo store (needs network)
@@ -93,7 +94,7 @@ out.zarr/                 zarr.json: zarr_conventions (multiscales, spatial:, pr
   `multiscales` (`mean` is written as `average`, the spec term). Level k+1 is built from level k re-read from the store.
 - **Chunks and shards**: inner chunks are `tile_size` squares (per variable if a mapping is given) with 1 along every non-spatial dim. Shards are
   power-of-2 multiples of tiles up to about 128 MiB uncompressed (or the pixel shape given by `shard_size`) (extended along the leading extra dim, e.g. time, at coarse levels),
-  none for levels with 4 chunks or fewer. Dask chunks equal shards, so parallel writes need no locks. Codec: zstd.
+  none for levels with 4 chunks or fewer. Dask chunks equal shards, so parallel writes need no locks. Codec: Blosc (zstd, bitshuffle) by default, plain zstd with `encoding_preset="zstd"`.
 - **GeoZarr conventions**: multiscales, `spatial:` and `proj:` attributes are built with `geozarr-toolkit` helpers,
   not handwritten dicts (`proj:code` when available, always `proj:wkt2`). Consolidated metadata is written at the end.
 - **CF grid_mapping**: every variable carries `grid_mapping = "spatial_ref"` and a `spatial_ref` variable is written,
