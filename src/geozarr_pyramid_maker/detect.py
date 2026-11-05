@@ -92,16 +92,60 @@ def _find_spatial_names(ds: xr.Dataset) -> tuple[str, str]:
     )
 
 
-def _first_fill(v: xr.DataArray) -> Any:
+def _first_fill(v: xr.DataArray, name: str = "?") -> Any:
+    """Declared fill of ``v`` (D-61): ``_FillValue``, ``missing_value``, rio nodata, then the
+    Zarr v3 ``encoding["fill_value"]`` unless it is the dtype's zero (zarr's default)."""
     for src in (v.attrs, v.encoding):
         for key in _FILL_KEYS:
             val = src.get(key)
             if val is not None:
                 return np.asarray(val).ravel()[0].item()
     try:
-        return v.rio.nodata
+        nodata = v.rio.nodata
     except Exception:
+        nodata = None
+    if nodata is not None:
+        return nodata
+    zfill = v.encoding.get("fill_value")
+    if zfill is None:
         return None
+    zfill = np.asarray(zfill).ravel()[0].item()
+    if zfill == 0:  # also False; NaN compares unequal, so it stays declared
+        logger.debug(
+            f"var {name!r}: Zarr fill_value {zfill!r} is the dtype default, not treated as a "
+            f"declared fill; pass fill_values={{{name!r}: <value>}} if it marks nodata"
+        )
+        return None
+    return zfill
+
+
+def _check_fill_values(
+    fill_values: Mapping[str, Any], dtypes: Mapping[str, np.dtype]
+) -> dict[str, Any]:
+    """Validate the ``fill_values`` override against the kept variables and their dtypes (D-61)."""
+    unknown = sorted(set(fill_values) - set(dtypes))
+    if unknown:
+        raise ValueError(
+            f"fill_values names unknown variable(s) {unknown}; kept variables: {sorted(dtypes)}."
+        )
+    out: dict[str, Any] = {}
+    for name, val in fill_values.items():
+        dtype = np.dtype(dtypes[name])
+        bad = f"fill_values[{name!r}]={val!r} does not fit the {dtype} variable {name!r}"
+        if dtype.kind == "b":
+            raise ValueError(f"{bad}: bool variables cannot carry a fill value.")
+        if isinstance(val, bool) or not isinstance(val, (int, float, np.integer, np.floating)):
+            raise ValueError(f"{bad}: expected a number.")
+        if dtype.kind == "f":
+            out[name] = float(val)
+            continue
+        if isinstance(val, (float, np.floating)) and not float(val).is_integer():
+            raise ValueError(f"{bad}: an integer is required (got NaN or a fraction).")
+        info = np.iinfo(dtype)
+        if not info.min <= int(val) <= info.max:
+            raise ValueError(f"{bad}: valid range is {info.min} to {info.max}.")
+        out[name] = int(val)
+    return out
 
 
 def _grid_mapping_names(ds: xr.Dataset) -> set[str]:
@@ -323,8 +367,15 @@ def _wrap_longitude(
 # ------------------------------------------------------------------------------ detect
 
 
-def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, GridInfo]:
-    """Return the normalised (still lazy) dataset and its GridInfo."""
+def detect(
+    ds: xr.Dataset | xr.DataArray,
+    crs: Any = None,
+    fill_values: Mapping[str, int | float] | None = None,
+) -> tuple[xr.Dataset, GridInfo]:
+    """Return the normalised (still lazy) dataset and its GridInfo.
+
+    ``fill_values`` overrides the fill of the named variables and counts as declared (D-61).
+    """
     if isinstance(ds, xr.DataArray):
         ds = ds.to_dataset(name=ds.name if ds.name is not None else "data")
     else:
@@ -368,7 +419,9 @@ def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, 
             f"variables present: {list(ds.data_vars)}."
         )
 
-    fills: dict[str, Any] = {name: _first_fill(ds[name]) for name in kept}
+    fills: dict[str, Any] = {name: _first_fill(ds[name], name) for name in kept}
+    if fill_values:
+        fills.update(_check_fill_values(fill_values, {n: ds[n].dtype for n in kept}))
 
     ds = ds.drop_vars(dropped + sorted(gm_names), errors="ignore")
     used_dims = {d for name in kept for d in ds[name].dims}
@@ -396,7 +449,11 @@ def detect(ds: xr.Dataset | xr.DataArray, crs: Any = None) -> tuple[xr.Dataset, 
         v = ds[name]
         fill = fills.get(name)
         attrs = {k: val for k, val in v.attrs.items() if k not in (*_FILL_KEYS, "grid_mapping")}
-        enc = {k: val for k, val in v.encoding.items() if k not in (*_FILL_KEYS, "grid_mapping")}
+        enc = {
+            k: val
+            for k, val in v.encoding.items()
+            if k not in (*_FILL_KEYS, "fill_value", "grid_mapping")
+        }
         if v.dtype.kind == "f" and fill is not None and not np.isnan(fill):
             v = v.where(v != fill)
         rec_fill, declared = effective_fill(v.dtype, v.attrs, fill, str(name))

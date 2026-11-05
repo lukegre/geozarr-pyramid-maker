@@ -222,6 +222,7 @@ def to_pyramid(
     store: str | Path | zarr.abc.store.Store,
     *,
     crs: Any = None,
+    fill_values: Mapping[str, int | float] | None = None,
     resampling: str | Mapping[str, str] = "auto",
     tile_size: int | Mapping[str, int] = 512,
     max_levels: int | None = None,
@@ -234,7 +235,7 @@ def to_pyramid(
 ) -> PyramidResult:
     """Write a GeoZarr multiscale pyramid (data only until M3)."""
     t_start = time.perf_counter()
-    ds, grid = detect(obj, crs=crs)
+    ds, grid = detect(obj, crs=crs, fill_values=fill_values)
     ds_attrs = dict(ds.attrs)
     plan = build_plan(
         grid,
