@@ -27,18 +27,20 @@ def is_valid(report: Mapping[str, list[str]]) -> bool:
     return not any(report.values())
 
 
-def _open_root(store: Any, storage_options: Mapping[str, Any] | None):
+def _open_root(store: Any, storage_options: Mapping[str, Any] | None, group: str | None = None):
     from .write import _resolve_store  # local: write.py imports validate (avoid a cycle)
 
     zstore = _resolve_store(store, storage_options)
+    group = (group or "").strip("/")
+    where = f"{store!r}" + (f" group {group!r}" if group else "")
     try:
-        root = zarr.open_group(zstore, mode="r")
+        root = zarr.open_group(zstore, path=group or None, mode="r")
     except FileNotFoundError:
-        raise FileNotFoundError(f"No zarr group found at {store!r}.") from None
+        raise FileNotFoundError(f"No zarr group found at {where}.") from None
     except Exception as err:
         if type(err).__name__ in ("GroupNotFoundError", "NodeNotFoundError", "KeyError"):
-            raise FileNotFoundError(f"No zarr group found at {store!r}.") from err
-        raise FileNotFoundError(f"Cannot read zarr store {store!r}: {err}") from err
+            raise FileNotFoundError(f"No zarr group found at {where}.") from err
+        raise FileNotFoundError(f"Cannot read zarr store {where}: {err}") from err
     return zstore, root
 
 
@@ -106,6 +108,7 @@ def _check_required_level(
 
 def validate(
     store: Any,
+    group: str | None = None,
     *,
     plan: PyramidPlan | None = None,
     storage_options: Mapping[str, Any] | None = None,
@@ -114,9 +117,11 @@ def validate(
 
     Returns a report with keys ``zarr_conventions``, ``multiscales``, ``spatial``, ``proj`` and
     ``structure``; empty lists everywhere mean the pyramid is valid. Invalid content never
-    raises; an unreadable or missing store raises ``FileNotFoundError``.
+    raises; an unreadable or missing store raises ``FileNotFoundError``. With ``group`` the
+    pyramid in that sub-group is validated (D-62).
     """
-    zstore, root = _open_root(store, storage_options)
+    zstore, root = _open_root(store, storage_options, group)
+    group = (group or "").strip("/")
     report: dict[str, list[str]] = {k: [] for k in KEYS}
     struct = report["structure"]
 
@@ -195,7 +200,7 @@ def validate(
                 )
 
     try:
-        xr.open_datatree(zstore, engine="zarr", consolidated=False).close()
+        xr.open_datatree(zstore, engine="zarr", group=group or None, consolidated=False).close()
     except Exception as err:
         struct.append(f"xr.open_datatree failed: {type(err).__name__}: {err}")
 

@@ -409,3 +409,83 @@ def test_per_variable_tile_and_shard_on_disk(multi_var, tmp_path):
     assert melt.chunks == (1, 16, 16) and melt.shards == (2, 32, 32)
     assert mask.chunks == (32, 32) and mask.shards is None
     assert gpm.is_valid(gpm.validate(str(path)))
+
+
+# --------------------------------------------------------------------------- group= (D-62)
+
+
+def _store_with_root_attr(path):
+    zarr.open_group(LocalStore(path), mode="w").attrs["owner"] = "me"
+
+
+def test_group_two_pyramids_one_store(polar_3031, tmp_path):
+    path = tmp_path / "s.zarr"
+    _store_with_root_attr(path)
+    r1 = to_pyramid(polar_3031, str(path), group="maps", tile_size=64)
+    to_pyramid(polar_3031, str(path), group="diagnostics", tile_size=64)
+    assert r1.validation is not None and not any(r1.validation.values())
+
+    root = zarr.open_group(LocalStore(path), mode="r")
+    assert dict(root.attrs) == {"owner": "me"}  # pyramid attrs are on the groups, not the root
+    for g in ("maps", "diagnostics"):
+        assert "multiscales" in root[g].attrs
+        assert {"0", "1"} <= set(dict(root[g].groups()))
+        ds = xr.open_zarr(path, group=f"{g}/0", consolidated=False)
+        assert ds.sizes["x"] == polar_3031.sizes["x"]
+        # the pyramid group carries its own consolidated metadata
+        meta = json.loads((path / g / "zarr.json").read_text())
+        assert {"0", "1"} <= set(meta["consolidated_metadata"]["metadata"])
+    # the root's inline consolidated metadata lists both groups and their levels
+    cons = json.loads((path / "zarr.json").read_text())["consolidated_metadata"]["metadata"]
+    for g in ("maps", "diagnostics"):
+        assert g in cons and f"{g}/0" in cons and f"{g}/1" in cons
+    assert root.metadata.consolidated_metadata is not None
+    xr.open_datatree(path / "maps", engine="zarr", consolidated=False).close()
+
+
+def test_group_overwrite_only_replaces_group(polar_3031, tmp_path):
+    path = tmp_path / "s.zarr"
+    _store_with_root_attr(path)
+    to_pyramid(polar_3031, str(path), group="maps", tile_size=64)
+    to_pyramid(polar_3031, str(path), group="other", tile_size=64)
+    with pytest.raises(FileExistsError):
+        to_pyramid(polar_3031, str(path), group="maps", tile_size=64)
+    res = to_pyramid(polar_3031, str(path), group="maps", tile_size=512, overwrite=True)
+    assert len(res.plan.levels) == 1
+    root = zarr.open_group(LocalStore(path), mode="r")
+    assert root.attrs["owner"] == "me"
+    assert sorted(dict(root["maps"].groups())) == ["0"]
+    assert {"0", "1"} <= set(dict(root["other"].groups()))
+    cons = json.loads((path / "zarr.json").read_text())["consolidated_metadata"]["metadata"]
+    assert "maps/0" in cons and "maps/1" not in cons and "other/1" in cons
+
+
+def test_group_nested_and_slashes(polar_3031, tmp_path):
+    path = tmp_path / "s.zarr"
+    to_pyramid(polar_3031, str(path), group="/a/b/", tile_size=64)
+    root = zarr.open_group(LocalStore(path), mode="r")
+    assert isinstance(root["a"], zarr.Group) and "multiscales" in root["a/b"].attrs
+    cons = json.loads((path / "zarr.json").read_text())["consolidated_metadata"]["metadata"]
+    assert "a/b/0" in cons
+    xr.open_zarr(path, group="a/b/0", consolidated=False).close()
+
+
+def test_group_memory_store(polar_3031):
+    # no root group yet: the group write creates it implicitly
+    store = zarr.storage.MemoryStore()
+    to_pyramid(polar_3031, store, group="maps", tile_size=64)
+    assert "maps" in dict(zarr.open_group(store, mode="r").groups())
+
+
+def test_group_none_unchanged(polar_3031, tmp_path):
+    path = tmp_path / "s.zarr"
+    to_pyramid(polar_3031, str(path), group=None, tile_size=64)
+    assert "multiscales" in zarr.open_group(LocalStore(path), mode="r").attrs
+
+
+def test_group_accessor_and_bad_path(polar_3031, tmp_path):
+    path = tmp_path / "s.zarr"
+    polar_3031.geozarr.to_pyramid(path, group="m", tile_size=64)
+    assert "multiscales" in zarr.open_group(LocalStore(path), mode="r")["m"].attrs
+    with pytest.raises(ValueError, match="group"):
+        to_pyramid(polar_3031, str(path), group="a/../b", tile_size=64)

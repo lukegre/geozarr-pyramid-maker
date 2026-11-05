@@ -289,3 +289,12 @@ def test_parse_fill_values():
     for bad in ("a", "a=", "a=x"):
         with pytest.raises(ValueError, match="--fill-value"):
             _parse_fill_values([bad])
+
+
+def test_convert_and_validate_group(nc_in, tmp_path):
+    out = tmp_path / "out.zarr"
+    r = _run("convert", nc_in, out, "--tile-size", 32, "--group", "maps")
+    assert r.exit_code == 0, r.output + r.stderr
+    assert "validation: ok" in r.stdout
+    assert _run("validate", out, "--group", "maps").exit_code == 0
+    assert _run("validate", out).exit_code == 1

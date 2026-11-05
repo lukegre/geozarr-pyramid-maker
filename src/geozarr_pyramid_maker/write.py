@@ -103,9 +103,21 @@ def _s3_endpoint_options(endpoint: str) -> dict[str, Any]:
     return opts
 
 
-def _store_has_data(store: zarr.abc.store.Store) -> bool:
+def _norm_group(group: str | None) -> str:
+    """Strip surrounding slashes; "" means the store root."""
+    g = (group or "").strip("/")
+    if "//" in g or any(part in (".", "..") for part in g.split("/")):
+        raise ValueError(f"invalid group path {group!r}")
+    return g
+
+
+def _join(group: str, name: str) -> str:
+    return f"{group}/{name}" if group else name
+
+
+def _store_has_data(store: zarr.abc.store.Store, group: str = "") -> bool:
     try:
-        zarr.open(store, mode="r")
+        zarr.open(store, path=group or None, mode="r")
     except (FileNotFoundError, KeyError, ValueError):
         return False
     except Exception as err:  # zarr's NodeNotFoundError variants
@@ -115,13 +127,15 @@ def _store_has_data(store: zarr.abc.store.Store) -> bool:
     return True
 
 
-def _check_local_target(zstore: zarr.abc.store.Store, store: Any, overwrite: bool) -> None:
+def _check_local_target(
+    zstore: zarr.abc.store.Store, store: Any, overwrite: bool, group: str = ""
+) -> None:
     """Never delete or write into a non-empty local directory that is not a Zarr store."""
     if not isinstance(zstore, zarr.storage.LocalStore):
         return
     root = Path(zstore.root)
     if root.is_dir() and any(root.iterdir()) and not (root / "zarr.json").exists():
-        action = "delete" if overwrite else "write into"
+        action = "delete" if overwrite and not group else "write into"
         raise FileExistsError(f"{store!r} is not a Zarr store; refusing to {action} it")
 
 
@@ -171,7 +185,9 @@ def _prepare(ds: xr.Dataset, specs: Mapping[str, ChunkSpec], fills: Mapping[str,
     return ds
 
 
-def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -> None:
+def _write_level(
+    ds, store, plan: PyramidPlan, k: int, compression_level: int, group: str = ""
+) -> None:
     level = plan.levels[k]
     fills = {v.name: v.fill_value for v in plan.grid.variables}
     ds = _prepare(ds, level.chunks, fills)
@@ -188,18 +204,19 @@ def _write_level(ds, store, plan: PyramidPlan, k: int, compression_level: int) -
                 )
     ds = cf_prepare(ds, g.crs, level.transform, g.x_dim, g.y_dim, plan.resampling)
     enc = _encoding(ds, level.chunks, fills, compression_level)
+    path = _join(group, str(k))
     ds.to_zarr(
         store,
-        group=str(k),
+        group=path,
         zarr_format=3,
         mode="w",
         consolidated=False,
         write_empty_chunks=False,
         encoding=enc,
     )
-    zarr.open_group(store, path=str(k), mode="r+").attrs.update(level_attrs(plan, k))
+    zarr.open_group(store, path=path, mode="r+").attrs.update(level_attrs(plan, k))
     for v in plan.grid.variables:
-        shape = zarr.open_array(store, path=f"{k}/{v.name}", mode="r").shape
+        shape = zarr.open_array(store, path=f"{path}/{v.name}", mode="r").shape
         if shape != level.var_shape(v.name):
             raise RuntimeError(
                 f"Level {k} variable {v.name!r} has shape {shape}, plan says "
@@ -276,6 +293,7 @@ def to_pyramid(
     obj: xr.Dataset | xr.DataArray,
     store: str | Path | zarr.abc.store.Store,
     *,
+    group: str | None = None,
     crs: Any = None,
     fill_values: Mapping[str, int | float] | None = None,
     resampling: str | Mapping[str, str] = "auto",
@@ -291,6 +309,7 @@ def to_pyramid(
 ) -> PyramidResult:
     """Write a GeoZarr multiscale pyramid (data only until M3)."""
     t_start = time.perf_counter()
+    grp = _norm_group(group)  # D-62: "" = the store root
     ds, grid = detect(obj, crs=crs, fill_values=fill_values)
     ds_attrs = dict(ds.attrs)
     plan = build_plan(
@@ -308,15 +327,16 @@ def to_pyramid(
     logger.debug("Pyramid plan:\n{}", plan)
 
     zstore = _resolve_store(store, storage_options)
-    _check_local_target(zstore, store, overwrite)
-    if _store_has_data(zstore):
+    where = f"{store!r} group {grp!r}" if grp else f"{store!r}"
+    _check_local_target(zstore, store, overwrite, grp)
+    if _store_has_data(zstore, grp):
         if not overwrite:
             raise FileExistsError(
-                f"{store!r} already contains a zarr group or array; "
-                "pass overwrite=True to replace it"
+                f"{where} already contains a zarr group or array; pass overwrite=True to replace it"
             )
-        logger.warning("Overwriting existing zarr data in {}", store)
-        zarr.open_group(zstore, mode="w")
+        logger.warning("Overwriting existing zarr data in {}", where)
+        # with a group, only that sub-tree is deleted and recreated; the root is never touched
+        zarr.open_group(zstore, path=grp or None, mode="w")
 
     if not any(v.chunks is not None for v in ds.data_vars.values()):
         logger.debug("Input is not dask-backed; chunking it to the level-0 plan")
@@ -326,7 +346,7 @@ def to_pyramid(
     fills = {v.name: v.fill_value for v in grid.variables}
 
     t0 = time.perf_counter()
-    _write_level(_bitround_level(ds, plan.keepbits, fills), zstore, plan, 0, compression_level)
+    _write_level(_bitround_level(ds, plan.keepbits, fills), zstore, plan, 0, compression_level, grp)
     timings["level_0"] = time.perf_counter() - t0
     logger.info(
         "Level 0 written: shape={} in {:.1f} s ({} uncompressed)",
@@ -341,7 +361,7 @@ def to_pyramid(
         # each variable to its shard shape (open_zarr(chunks={}) would give the *inner* chunks
         # for sharded arrays, i.e. many tiny tasks). mask_and_scale=False keeps ints raw.
         src = xr.open_zarr(
-            zstore, group=str(k), consolidated=False, chunks=None, mask_and_scale=False
+            zstore, group=_join(grp, str(k)), consolidated=False, chunks=None, mask_and_scale=False
         )
         src = src[variables].drop_vars("spatial_ref", errors="ignore")  # rebuilt per level
         specs = plan.levels[k].chunks
@@ -360,7 +380,7 @@ def to_pyramid(
             steps=(plan.levels[k].transform[4], plan.levels[k].transform[0]),
         )
         coarse = _bitround_level(coarse, plan.keepbits, fills)
-        _write_level(coarse, zstore, plan, k + 1, compression_level)
+        _write_level(coarse, zstore, plan, k + 1, compression_level, grp)
         timings[f"level_{k + 1}"] = time.perf_counter() - t0
         logger.info(
             "Level {} written: shape={} in {:.1f} s ({} uncompressed)",
@@ -370,18 +390,31 @@ def to_pyramid(
             _fmt_size(plan.levels[k + 1].nbytes),
         )
 
-    zarr.open_group(zstore, mode="r+").attrs.update(root_attrs(plan, ds_attrs))  # before D-19
+    # root attrs go on the pyramid group (the store root itself when no group is given)
+    zarr.open_group(zstore, path=grp or None, mode="r+").attrs.update(
+        root_attrs(plan, ds_attrs)
+    )  # before D-19
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="Consolidated metadata is currently not part", category=UserWarning
         )
-        zarr.consolidate_metadata(zstore)
+        zarr.consolidate_metadata(zstore, path=grp or None)
+        if grp:  # D-62: refresh the root's inline metadata so it lists the new group
+            try:
+                zarr.open_group(zstore, mode="r")
+            except Exception:
+                logger.warning(
+                    "Store root of {!r} is not a zarr group; its metadata was not consolidated",
+                    store,
+                )
+            else:
+                zarr.consolidate_metadata(zstore)
     report = None
     if validate:
         from .validate import validate as _validate
 
-        report = _validate(zstore, plan=plan, storage_options=storage_options)
+        report = _validate(zstore, group=grp or None, plan=plan, storage_options=storage_options)
         errors = [f"{k}: {e}" for k, errs in report.items() for e in errs]
         if errors:
             # validate() already logged the one-line result; add the details here
