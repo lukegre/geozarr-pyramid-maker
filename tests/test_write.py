@@ -272,7 +272,8 @@ def test_sharded_large_roundtrip(tmp_path, monkeypatch):
         # dask chunks equal the shard (or chunk) shape, except for the ragged last block
         for dim_chunks, size in zip(chunks["v"], s.dask_chunks, strict=True):
             assert all(c == size for c in dim_chunks[:-1]) and dim_chunks[-1] <= size
-        assert enc["v"].get("shards") == s.shards
+        # web preset: shards are the zarr chunks, the serializer holds the inner chunks
+        assert enc["v"]["chunks"] == (s.shards or s.chunks)
     arr = zarr.open_array(LocalStore(path), path="0/v", mode="r")
     assert arr.shards == spec.shards
     np.testing.assert_array_equal(_open_level(path, 0).v.values, data)
@@ -291,7 +292,7 @@ def test_sharded_large_roundtrip(tmp_path, monkeypatch):
 
 def test_zstd_level_configured(polar_3031, tmp_path):
     path = tmp_path / "o.zarr"
-    to_pyramid(polar_3031, str(path), tile_size=64, compression_level=7)
+    to_pyramid(polar_3031, str(path), tile_size=64, compression_level=7, encoding_preset="zstd")
     arr = zarr.open_array(LocalStore(path), path="0/melt", mode="r")
     zstd = [c for c in arr.compressors if isinstance(c, zarr.codecs.ZstdCodec)]
     assert zstd and zstd[0].level == 7

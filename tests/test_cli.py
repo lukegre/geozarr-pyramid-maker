@@ -298,3 +298,29 @@ def test_convert_and_validate_group(nc_in, tmp_path):
     assert "validation: ok" in r.stdout
     assert _run("validate", out, "--group", "maps").exit_code == 0
     assert _run("validate", out).exit_code == 1
+
+
+def test_convert_preset_web(nc_in, tmp_path):
+    out = tmp_path / "web.zarr"
+    r = _run("convert", nc_in, out, "--tile-size", 32, "--preset", "web", "--keepbits", 8)
+    assert r.exit_code == 0, r.output + r.stderr
+    assert "validation: ok" in r.stdout
+    meta = (out / "0" / "melt" / "zarr.json").read_text()
+    assert "blosc" in meta and "bitshuffle" in meta
+    assert _run("convert", nc_in, tmp_path / "bad.zarr", "--preset", "nope").exit_code != 0
+    assert _run("convert", nc_in, tmp_path / "bad2.zarr", "--preset", "default").exit_code != 0
+
+
+def test_convert_default_is_web(nc_in, tmp_path):
+    out = tmp_path / "dflt.zarr"
+    r = _run("convert", nc_in, out, "--tile-size", 32)
+    assert r.exit_code == 0, r.output + r.stderr
+    assert "blosc" in (out / "0" / "melt" / "zarr.json").read_text()
+
+
+def test_convert_preset_zstd(nc_in, tmp_path):
+    out = tmp_path / "zstd.zarr"
+    r = _run("convert", nc_in, out, "--tile-size", 32, "--preset", "zstd")
+    assert r.exit_code == 0, r.output + r.stderr
+    meta = (out / "0" / "melt" / "zarr.json").read_text()
+    assert "zstd" in meta and "blosc" not in meta

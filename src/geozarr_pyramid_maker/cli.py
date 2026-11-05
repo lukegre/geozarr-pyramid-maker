@@ -3,6 +3,7 @@
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -52,6 +53,22 @@ KeepbitsOpt = Annotated[
         "--keepbits",
         help="Bit rounding: mantissa bits kept (float32 0-23, float64 0-52) for all float "
         "variables and/or repeatable var=bits pairs (default: no rounding).",
+    ),
+]
+
+
+class Preset(StrEnum):
+    web = "web"
+    zstd = "zstd"
+
+
+PresetOpt = Annotated[
+    Preset,
+    typer.Option(
+        "--preset",
+        help="Encoding preset: 'web' (default) writes blosc inner chunks in C order for "
+        "browser readers; 'zstd' writes plain zstd chunks in zarr's Morton shard order "
+        "(D-63).",
     ),
 ]
 LevelsOpt = Annotated[int | None, typer.Option("--max-levels", help="Maximum number of levels.")]
@@ -264,6 +281,7 @@ def convert(
     shard_size: ShardOpt = None,
     keepbits: KeepbitsOpt = None,
     compression_level: Annotated[int, typer.Option("--compression-level")] = 3,
+    preset: PresetOpt = Preset.web,
     group: Annotated[
         str | None,
         typer.Option("--group", help="Write the pyramid into this sub-group of OUT (D-62)."),
@@ -290,6 +308,7 @@ def convert(
             shard_size=_parse_size_opts(shard_size, names, "--shard-size", _shard, None),
             keepbits=_parse_keepbits(keepbits),
             compression_level=compression_level,
+            encoding_preset=preset.value,
             overwrite=overwrite,
             validate=not no_validate,
         )

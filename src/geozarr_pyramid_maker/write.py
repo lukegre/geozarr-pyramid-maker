@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
@@ -28,6 +28,7 @@ from .resample import downsample
 _URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 _OBSTORE_SCHEMES = ("s3", "gs", "gcs", "az", "abfs", "memory")
 _CLOUD_HINT = "pip install geozarr-pyramid-maker[cloud]"
+_PRESETS = ("web", "zstd")
 
 
 @dataclass(frozen=True)
@@ -142,8 +143,46 @@ def _check_local_target(
 # --------------------------------------------------------------------------- level writing
 
 
+def _check_preset(encoding_preset: str, compression_level: int) -> None:
+    if encoding_preset not in _PRESETS:
+        raise ValueError(f"encoding_preset must be one of {_PRESETS}, got {encoding_preset!r}.")
+    if encoding_preset == "web" and not (
+        isinstance(compression_level, int) and 0 <= compression_level <= 9
+    ):
+        raise ValueError(
+            f"compression_level must be an integer in 0-9 for encoding_preset='web' (blosc), "
+            f"got {compression_level!r}."
+        )
+
+
+def _web_encoding(da: xr.DataArray, spec: ChunkSpec, compression_level: int) -> dict[str, Any]:
+    """Blosc inner codec and, for sharded specs, lexicographic inner-chunk order (D-63)."""
+    from zarr.codecs import BloscCodec, BytesCodec, ShardingCodec
+
+    blosc = BloscCodec(
+        cname="zstd",
+        clevel=compression_level,
+        typesize=da.dtype.itemsize,
+        shuffle="bitshuffle" if da.dtype.kind == "f" else "shuffle",
+    )
+    if spec.shards is None:
+        return {"chunks": spec.chunks, "compressors": [blosc]}
+    # an explicit serializer replaces the "shards" argument; never pass both
+    sharding = ShardingCodec(
+        chunk_shape=spec.chunks,
+        codecs=[BytesCodec(), blosc],
+        subchunk_write_order="lexicographic",
+    )
+    return {"chunks": spec.shards, "serializer": sharding, "compressors": None}
+
+
 def _encoding(
-    ds: xr.Dataset, specs: Mapping[str, ChunkSpec], fills: Mapping[str, Any], compression_level: int
+    ds: xr.Dataset,
+    specs: Mapping[str, ChunkSpec],
+    fills: Mapping[str, Any],
+    compression_level: int,
+    encoding_preset: str = "web",
+    spatial_dims: tuple[str, str] | None = None,
 ):
     enc: dict[str, dict[str, Any]] = {}
     for name in ds.data_vars:
@@ -151,12 +190,21 @@ def _encoding(
         spec = specs[name]
         if len(spec.chunks) != ds[name].ndim:
             raise ValueError(f"chunk spec {spec.chunks} does not match dims of {name!r}")
-        e: dict[str, Any] = {
-            "chunks": spec.chunks,
-            "compressors": [zarr.codecs.ZstdCodec(level=compression_level)],
-        }
-        if spec.shards is not None:
-            e["shards"] = spec.shards
+        if encoding_preset != "zstd":
+            # lexicographic order only keeps a time step contiguous if y, x are the last dims
+            if spatial_dims is not None and tuple(ds[name].dims[-2:]) != spatial_dims:
+                raise RuntimeError(
+                    f"encoding_preset='web' needs {name!r} dims to end in {spatial_dims}, "
+                    f"got {ds[name].dims}"
+                )
+            e = _web_encoding(ds[name], spec, compression_level)
+        else:
+            e = {
+                "chunks": spec.chunks,
+                "compressors": [zarr.codecs.ZstdCodec(level=compression_level)],
+            }
+            if spec.shards is not None:
+                e["shards"] = spec.shards
         # zarr v3 in xarray 2026.7: "fill_value" is the encoding key (xarray maps a CF
         # "_FillValue" onto it as well); we set it directly and never leave _FillValue in attrs.
         fill = fills.get(name)
@@ -186,7 +234,13 @@ def _prepare(ds: xr.Dataset, specs: Mapping[str, ChunkSpec], fills: Mapping[str,
 
 
 def _write_level(
-    ds, store, plan: PyramidPlan, k: int, compression_level: int, group: str = ""
+    ds,
+    store,
+    plan: PyramidPlan,
+    k: int,
+    compression_level: int,
+    group: str = "",
+    encoding_preset: str = "web",
 ) -> None:
     level = plan.levels[k]
     fills = {v.name: v.fill_value for v in plan.grid.variables}
@@ -203,7 +257,7 @@ def _write_level(
                     f"Level {k} coordinate {dim!r} does not match the plan transform"
                 )
     ds = cf_prepare(ds, g.crs, level.transform, g.x_dim, g.y_dim, plan.resampling)
-    enc = _encoding(ds, level.chunks, fills, compression_level)
+    enc = _encoding(ds, level.chunks, fills, compression_level, encoding_preset, (g.y_dim, g.x_dim))
     path = _join(group, str(k))
     ds.to_zarr(
         store,
@@ -302,6 +356,7 @@ def to_pyramid(
     shard_size: int | Mapping[str, Any] | None = None,
     keepbits: int | Mapping[str, int] | None = None,
     compression_level: int = 3,
+    encoding_preset: Literal["web", "zstd"] = "web",
     overwrite: bool = False,
     validate: bool = True,
     preview: bool = False,
@@ -309,6 +364,7 @@ def to_pyramid(
 ) -> PyramidResult:
     """Write a GeoZarr multiscale pyramid (data only until M3)."""
     t_start = time.perf_counter()
+    _check_preset(encoding_preset, compression_level)
     grp = _norm_group(group)  # D-62: "" = the store root
     ds, grid = detect(obj, crs=crs, fill_values=fill_values)
     ds_attrs = dict(ds.attrs)
@@ -325,6 +381,7 @@ def to_pyramid(
         "Pyramid plan: {} level(s), {} uncompressed in total", len(plan.levels), _fmt_size(total)
     )
     logger.debug("Pyramid plan:\n{}", plan)
+    logger.debug("Encoding preset: {}", encoding_preset)
 
     zstore = _resolve_store(store, storage_options)
     where = f"{store!r} group {grp!r}" if grp else f"{store!r}"
@@ -346,7 +403,15 @@ def to_pyramid(
     fills = {v.name: v.fill_value for v in grid.variables}
 
     t0 = time.perf_counter()
-    _write_level(_bitround_level(ds, plan.keepbits, fills), zstore, plan, 0, compression_level, grp)
+    _write_level(
+        _bitround_level(ds, plan.keepbits, fills),
+        zstore,
+        plan,
+        0,
+        compression_level,
+        grp,
+        encoding_preset,
+    )
     timings["level_0"] = time.perf_counter() - t0
     logger.info(
         "Level 0 written: shape={} in {:.1f} s ({} uncompressed)",
@@ -380,7 +445,7 @@ def to_pyramid(
             steps=(plan.levels[k].transform[4], plan.levels[k].transform[0]),
         )
         coarse = _bitround_level(coarse, plan.keepbits, fills)
-        _write_level(coarse, zstore, plan, k + 1, compression_level, grp)
+        _write_level(coarse, zstore, plan, k + 1, compression_level, grp, encoding_preset)
         timings[f"level_{k + 1}"] = time.perf_counter() - t0
         logger.info(
             "Level {} written: shape={} in {:.1f} s ({} uncompressed)",

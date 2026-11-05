@@ -43,6 +43,11 @@ and the target tests, plus the rule: TDD (red → green), and run `.venv/bin/pyt
 - **Subagents never run uv** (their unsandboxed requests are denied). They use the already-synced venv, which works
   sandboxed: `.venv/bin/python -m pytest`, `.venv/bin/ruff check`, `.venv/bin/ruff format`. If a subagent needs a new
   dependency, it reports back and the main session runs `uv add`.
+- Always `uv sync --all-extras`. A plain `uv sync` removes the `cloud` extra, so `obstore` disappears and
+  `tests/test_write.py` fails to import (2026-11-05).
+- Tests that compare two pyramid writes byte for byte must ignore the root `attributes.history`. It holds a
+  timestamp with 1 s resolution and differs when the writes cross a second boundary. This is a flake, not a
+  Python 3.12 problem, although it first showed up in the 3.12 run (2026-11-05).
 - Python 3.12 check (main session): `UV_PROJECT_ENVIRONMENT=$TMPDIR/venv312 uv run --python 3.12 --all-extras python -m pytest`.
 - src layout: `src/geozarr_pyramid_maker/`. Python ≥3.12.
 - Logging: **loguru**; the library never adds or removes handlers (D-08). INFO for milestones, DEBUG for the plan, TRACE for internals, WARNING for auto-corrections.

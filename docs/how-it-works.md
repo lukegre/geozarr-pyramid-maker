@@ -28,7 +28,7 @@ out.zarr/                 zarr.json: zarr_conventions (multiscales, spatial:, pr
   `multiscales` (`mean` is written as `average`, the spec term). Level k+1 is built from level k re-read from the store.
 - **Chunks and shards**: inner chunks are `tile_size` squares (per variable if a mapping is given) with 1 along every non-spatial dim. Shards are
   power-of-2 multiples of tiles up to about 128 MiB uncompressed (or the pixel shape given by `shard_size`) (extended along the leading extra dim, e.g. time, at coarse levels),
-  none for levels with 4 chunks or fewer. Dask chunks equal shards, so parallel writes need no locks. Codec: zstd.
+  none for levels with 4 chunks or fewer. Dask chunks equal shards, so parallel writes need no locks. Codec: Blosc (zstd, bitshuffle) by default, plain zstd with `encoding_preset="zstd"`.
 - **GeoZarr conventions**: multiscales, `spatial:` and `proj:` attributes are built with `geozarr-toolkit` helpers,
   not handwritten dicts (`proj:code` when available, always `proj:wkt2`). Consolidated metadata is written at the end.
 - **CF grid_mapping**: every variable carries `grid_mapping = "spatial_ref"` and a `spatial_ref` variable is written,
