@@ -37,7 +37,7 @@ tree = xr.open_datatree("basal_melt.zarr", engine="zarr")  # levels "0" ... "N"
 ```
 
 `to_pyramid` options (all keyword-only): `crs`, `resampling` (`"auto"`, a method, or `{var: method}`; methods `mean`,
-`nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable), `max_levels`, `compression_level=3`,
+`nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable; `-1` means the whole dim, and `y`/`x` name the spatial dims whatever they are called), `max_levels`, `compression_level=3`,
 `overwrite=False`, `validate=True`, `preview=False`, `storage_options`. Use `gpm.configure_logging("INFO")` to see progress.
 
 A full example on real data is in [`examples/oceansoda_dfco2.py`](examples/oceansoda_dfco2.py) and

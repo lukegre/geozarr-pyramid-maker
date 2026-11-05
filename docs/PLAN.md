@@ -56,7 +56,7 @@ to_pyramid(
     resampling="auto",          # "auto" | method | {var: method}; methods: mean, nearest, mode, min, max
     tile_size=512,              # inner chunk edge in px (the viewer tile size); int or {var: px} (D-57)
     max_levels=None,            # default: until the grid fits in one tile
-    shard_size=None,            # None = automatic (~128 MiB); or px shape: int, {dim: px}, {var: ...} (D-58)
+    shard_size=None,            # None = automatic (~128 MiB); or px shape: int, {dim: px}, {var: ...} (D-58); -1 = whole dim, "y"/"x" alias spatial dims (D-59)
     compression_level=3,        # zstd
     overwrite=False,            # never delete existing data silently
     validate=True,

@@ -236,6 +236,13 @@ def test_shard_size_per_variable_convert(nc_in, tmp_path):
     assert melt.shards == (2, 32, 32)
 
 
+def test_shard_size_whole_dim_via_cli(nc_in):
+    r = _run("plan", nc_in, "--tile-size", 16, "--shard-size", "time:-1,y:32,x:32")
+    assert r.exit_code == 0, r.stderr
+    r = _run("plan", nc_in, "--tile-size", 16, "--shard-size", "-1")
+    assert r.exit_code == 0, r.stderr
+
+
 def test_shard_size_bytes_rejected(nc_in):
     r = _run("plan", nc_in, "--shard-size", "128MiB")
     assert r.exit_code == 2
@@ -258,3 +265,11 @@ def test_tile_size_not_int_error(nc_in):
     r = _run("plan", nc_in, "--tile-size", "melt=big")
     assert r.exit_code == 2
     assert "--tile-size" in r.stderr
+
+
+def test_shard_option_whole_dim_and_aliases():
+    assert _shard("-1") == -1
+    assert _shard("time:-1,y:2048,x:2048") == {"time": -1, "y": 2048, "x": 2048}
+    assert _parse_size_opts(["a=time:-1,y:64,x:64"], ["a"], "--shard-size", _shard, None) == {
+        "a": {"time": -1, "y": 64, "x": 64}
+    }

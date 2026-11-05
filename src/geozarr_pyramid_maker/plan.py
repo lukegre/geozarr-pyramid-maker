@@ -105,10 +105,25 @@ def _per_variable[T](
     return {n: value.get(n, default) for n in names}
 
 
+def _resolve_aliases(spec: Mapping[str, int], grid: GridInfo, valid_dims: list[str]) -> dict:
+    """Rename the generic keys 'y'/'x' to the grid's spatial dim names (D-59)."""
+    out = dict(spec)
+    for alias, real in (("y", grid.y_dim), ("x", grid.x_dim)):
+        if alias == real or alias not in out or alias in valid_dims:
+            continue  # a real dim of that name (spatial or not) needs no aliasing
+        if real in out:
+            raise ValueError(f"shard_size has both {alias!r} and {real!r}; they are the same dim.")
+        out[real] = out.pop(alias)
+    return out
+
+
 def _resolve_shard(
     spec: Any, var: VarInfo, tile: int, grid: GridInfo, valid_dims: list[str]
 ) -> dict[str, int] | None:
-    """One shard spec (None, int or dim -> px) to a dim -> px dict for ``var`` (D-58)."""
+    """One shard spec (None, int or dim -> px) to a dim -> px dict for ``var`` (D-58).
+
+    A value of -1 means the whole dim; 'y'/'x' alias the spatial dims (D-59).
+    """
     if spec is None:
         return None
     if isinstance(spec, (str, bool)) or not isinstance(spec, (int, Mapping)):
@@ -118,19 +133,32 @@ def _resolve_shard(
         )
     if isinstance(spec, int):
         spec = {grid.y_dim: spec, grid.x_dim: spec}
+    spec = _resolve_aliases(spec, grid, valid_dims)
     unknown = [k for k in spec if k not in valid_dims]
     if unknown:
-        raise ValueError(f"shard_size has unknown dim(s) {unknown}; valid: {valid_dims}.")
+        raise ValueError(
+            f"shard_size has unknown dim(s) {unknown}; valid: {valid_dims} "
+            "(plus 'y'/'x' for the spatial dims)."
+        )
     missing = [d for d in (grid.y_dim, grid.x_dim) if d not in spec]
     if missing:
         raise ValueError(f"shard_size needs both spatial dims; missing {missing}.")
-    if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in spec.values()):
-        raise ValueError(f"shard_size values must be ints >= 1, got {dict(spec)}.")
+    if any(
+        isinstance(n, bool) or not isinstance(n, int) or (n < 1 and n != -1) for n in spec.values()
+    ):
+        raise ValueError(
+            f"shard_size values must be ints >= 1 or -1 (whole dim), got {dict(spec)}."
+        )
     out: dict[str, int] = {}
     for dim in var.dims:  # the variable's own dims, in array order; extra dims default to 1
         if dim not in spec:
             continue
         n = spec[dim]
+        if dim in (grid.y_dim, grid.x_dim):
+            if n == -1:  # whole extent, rounded up to whole chunks; clipped per level later
+                n = math.ceil(var.shape[var.dims.index(dim)] / tile) * tile
+        elif n == -1:  # whole extra dim
+            n = var.shape[var.dims.index(dim)]
         if dim in (grid.y_dim, grid.x_dim) and n % tile:
             rounded = math.ceil(n / tile) * tile
             logger.warning(
@@ -149,10 +177,11 @@ def _per_variable_shards(
     valid_dims = list(
         dict.fromkeys([*grid.extra_dims, *(d for v in grid.variables for d in v.dims)])
     )
-    if isinstance(shard_size, Mapping) and not all(k in valid_dims for k in shard_size):
+    dim_keys = [*valid_dims, "y", "x"]  # 'y'/'x' alias the spatial dims (D-59)
+    if isinstance(shard_size, Mapping) and not all(k in dim_keys for k in shard_size):
         if not all(k in names for k in shard_size):
             raise ValueError(
-                f"shard_size keys {list(shard_size)} are neither all dims {valid_dims} "
+                f"shard_size keys {list(shard_size)} are neither all dims {dim_keys} "
                 f"nor all variables {names}."
             )
         specs = {n: shard_size.get(n) for n in names}
