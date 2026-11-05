@@ -25,7 +25,7 @@ class _GeoZarrAccessor:
         resampling: str | Mapping[str, str] = "auto",
         tile_size: int | Mapping[str, int] = 512,
         max_levels: int | None = None,
-        shard_size: int | str | Mapping[str, int | str] = "128MiB",
+        shard_size: int | Mapping[str, Any] | None = None,
     ) -> PyramidPlan:
         """Dry run: detect the grid and return the pyramid plan without touching any data."""
         _, grid = detect(self._obj, crs=crs)

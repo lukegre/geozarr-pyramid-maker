@@ -6,11 +6,12 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
-from .chunking import ChunkSpec, choose_chunks, parse_size
-from .detect import GridInfo
+from .chunking import AUTO_SHARD_BYTES, ChunkSpec, choose_chunks, fixed_chunks
+from .detect import GridInfo, VarInfo
 
 RESAMPLING_METHODS = ("mean", "nearest", "mode", "min", "max")
 _ROUNDING_METHODS = ("mean", "min", "max")
@@ -48,7 +49,7 @@ class PyramidPlan:
     resampling: Mapping[str, str]  # var -> method
     levels: tuple[LevelPlan, ...]
     tile_size: Mapping[str, int]  # var -> tile edge in pixels
-    shard_size: Mapping[str, int]  # var -> target shard bytes
+    shard_size: Mapping[str, Mapping[str, int] | None]  # var -> dim -> px, None = automatic
 
     def __repr__(self) -> str:
         return _format_plan(self)
@@ -104,13 +105,72 @@ def _per_variable[T](
     return {n: value.get(n, default) for n in names}
 
 
+def _resolve_shard(
+    spec: Any, var: VarInfo, tile: int, grid: GridInfo, valid_dims: list[str]
+) -> dict[str, int] | None:
+    """One shard spec (None, int or dim -> px) to a dim -> px dict for ``var`` (D-58)."""
+    if spec is None:
+        return None
+    if isinstance(spec, (str, bool)) or not isinstance(spec, (int, Mapping)):
+        raise ValueError(
+            f"shard_size {spec!r} is not a shape: shard size is now in pixels "
+            "(an int, or a mapping of dim name to pixels), not bytes."
+        )
+    if isinstance(spec, int):
+        spec = {grid.y_dim: spec, grid.x_dim: spec}
+    unknown = [k for k in spec if k not in valid_dims]
+    if unknown:
+        raise ValueError(f"shard_size has unknown dim(s) {unknown}; valid: {valid_dims}.")
+    missing = [d for d in (grid.y_dim, grid.x_dim) if d not in spec]
+    if missing:
+        raise ValueError(f"shard_size needs both spatial dims; missing {missing}.")
+    if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in spec.values()):
+        raise ValueError(f"shard_size values must be ints >= 1, got {dict(spec)}.")
+    out: dict[str, int] = {}
+    for dim in var.dims:  # the variable's own dims, in array order; extra dims default to 1
+        if dim not in spec:
+            continue
+        n = spec[dim]
+        if dim in (grid.y_dim, grid.x_dim) and n % tile:
+            rounded = math.ceil(n / tile) * tile
+            logger.warning(
+                f"shard_size {dim}={n} for {var.name!r} is not a multiple of its tile size "
+                f"({tile}); using {rounded}"
+            )
+            n = rounded
+        out[dim] = n
+    return out
+
+
+def _per_variable_shards(
+    grid: GridInfo, shard_size: Any, tiles: Mapping[str, int]
+) -> dict[str, dict[str, int] | None]:
+    names = [v.name for v in grid.variables]
+    valid_dims = list(
+        dict.fromkeys([*grid.extra_dims, *(d for v in grid.variables for d in v.dims)])
+    )
+    if isinstance(shard_size, Mapping) and not all(k in valid_dims for k in shard_size):
+        if not all(k in names for k in shard_size):
+            raise ValueError(
+                f"shard_size keys {list(shard_size)} are neither all dims {valid_dims} "
+                f"nor all variables {names}."
+            )
+        specs = {n: shard_size.get(n) for n in names}
+    else:
+        specs = dict.fromkeys(names, shard_size)
+    return {
+        v.name: _resolve_shard(specs[v.name], v, tiles[v.name], grid, valid_dims)
+        for v in grid.variables
+    }
+
+
 def build_plan(
     grid: GridInfo,
     *,
     resampling: str | Mapping[str, str] = "auto",
     tile_size: int | Mapping[str, int] = 512,
     max_levels: int | None = None,
-    shard_size: int | str | Mapping[str, int | str] = "128MiB",
+    shard_size: int | Mapping[str, Any] | None = None,
 ) -> PyramidPlan:
     tiles = _per_variable(grid, tile_size, 512, "tile_size")
     for name, t in tiles.items():
@@ -118,9 +178,7 @@ def build_plan(
             raise ValueError(f"tile_size must be >= 1, got {t} for {name!r}")
     if max_levels is not None and max_levels < 1:
         raise ValueError(f"max_levels must be >= 1, got {max_levels}")
-    shards = {
-        n: parse_size(s) for n, s in _per_variable(grid, shard_size, "128MiB", "shard_size").items()
-    }
+    shards = _per_variable_shards(grid, shard_size, tiles)
     top_tile = min(tiles.values())
     methods = resolve_resampling(grid, resampling)
 
@@ -141,15 +199,18 @@ def build_plan(
             _extra_shapes=extra,
             _itemsizes=itemsize,
         )
-        chunks = {
-            name: choose_chunks(
-                level.var_shape(name),
-                itemsize[name],
-                tile_size=tiles[name],
-                shard_size=shards[name],
-            )
-            for name in extra
-        }
+        chunks = {}
+        for v in grid.variables:
+            name, shape = v.name, level.var_shape(v.name)
+            if shards[name] is None:
+                chunks[name] = choose_chunks(
+                    shape, itemsize[name], tile_size=tiles[name], shard_size=AUTO_SHARD_BYTES
+                )
+            else:
+                shard = tuple(shards[name].get(d, 1) for d in v.dims)
+                chunks[name] = fixed_chunks(
+                    shape, itemsize[name], tile_size=tiles[name], shard=shard
+                )
         object.__setattr__(level, "chunks", chunks)
         levels.append(level)
         if max(ny, nx) <= top_tile or (max_levels is not None and len(levels) >= max_levels):
@@ -190,6 +251,10 @@ def _fmt_size(n: int) -> str:
     return _fmt_bytes(n).replace(".0 ", " ")
 
 
+def _shard_text(shard: Mapping[str, int] | None) -> str:
+    return "auto" if shard is None else " × ".join(f"{d} {n}" for d, n in shard.items())
+
+
 def _format_plan(plan: PyramidPlan) -> str:
     grid = plan.grid
     crs = grid.crs
@@ -197,10 +262,11 @@ def _format_plan(plan: PyramidPlan) -> str:
     auth = crs.to_authority()
     crs_label = f"{auth[0]}:{auth[1]}" if auth else (f"EPSG:{epsg}" if epsg else crs.name)
     extra = ", ".join(f"{k}={v}" for k, v in grid.extra_dims.items()) or "none"
-    tiles, shards = set(plan.tile_size.values()), set(plan.shard_size.values())
+    tiles = set(plan.tile_size.values())
+    shards = {_shard_text(s) for s in plan.shard_size.values()}
     uniform = len(tiles) <= 1 and len(shards) <= 1
     if uniform:
-        sizes = f"tile: {tiles.pop()} px   shard target: {_fmt_size(shards.pop())}"
+        sizes = f"tile: {tiles.pop()} px   shard: {shards.pop()}"
     else:
         sizes = "tile/shard: per variable"
     lines = [
@@ -213,7 +279,7 @@ def _format_plan(plan: PyramidPlan) -> str:
         line = f"    {v.name}: {plan.resampling[v.name]}, {v.dtype}"
         if not uniform:
             line += (
-                f", tile {plan.tile_size[v.name]} px, shard {_fmt_size(plan.shard_size[v.name])}"
+                f", tile {plan.tile_size[v.name]} px, shard {_shard_text(plan.shard_size[v.name])}"
             )
         lines.append(line)
     header = ("level", "shape", "resolution", "variable", "chunks", "shards", "size")

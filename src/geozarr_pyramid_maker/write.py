@@ -225,7 +225,7 @@ def to_pyramid(
     resampling: str | Mapping[str, str] = "auto",
     tile_size: int | Mapping[str, int] = 512,
     max_levels: int | None = None,
-    shard_size: int | str | Mapping[str, int | str] = "128MiB",
+    shard_size: int | Mapping[str, Any] | None = None,
     compression_level: int = 3,
     overwrite: bool = False,
     validate: bool = True,

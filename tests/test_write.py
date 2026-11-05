@@ -263,7 +263,7 @@ def test_sharded_large_roundtrip(tmp_path, monkeypatch):
 
     monkeypatch.setattr(xr.Dataset, "to_zarr", spy)
     path = tmp_path / "big.zarr"
-    res = to_pyramid(ds, str(path), tile_size=256, shard_size="1MiB")
+    res = to_pyramid(ds, str(path), tile_size=256, shard_size=512)
     spec = res.plan.levels[0].chunks["v"]
     assert spec.shards is not None
     assert seen[0][0] == "0"
@@ -400,13 +400,12 @@ def test_per_variable_tile_and_shard_on_disk(multi_var, tmp_path):
         multi_var,
         str(path),
         tile_size={"melt": 16, "mask": 32},
-        shard_size={"melt": "4KiB"},
+        shard_size={"melt": {"time": 2, "y": 32, "x": 32}},
         validate=False,
     )
     assert res.plan.tile_size == {"melt": 16, "mask": 32}
     melt = zarr.open_array(LocalStore(path), path="0/melt", mode="r")
     mask = zarr.open_array(LocalStore(path), path="0/mask", mode="r")
-    assert melt.chunks[-2:] == (16, 16) and melt.shards is not None
-    assert mask.chunks == (32, 32)
-    assert melt.shards != mask.shards
+    assert melt.chunks == (1, 16, 16) and melt.shards == (2, 32, 32)
+    assert mask.chunks == (32, 32) and mask.shards is None
     assert gpm.is_valid(gpm.validate(str(path)))
