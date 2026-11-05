@@ -136,7 +136,7 @@ def _coarsen_reduce(data: da.Array, method: str, fill) -> da.Array:
         work = data
     arr = xr.DataArray(work, dims=dims)
     coarse = arr.coarsen({dims[ay]: 2, dims[ax]: 2}, boundary="pad")
-    res = getattr(coarse, method)(skipna=True).data
+    res = getattr(coarse, method)().data
     if is_float:
         return res.astype(dtype)
     if method == "mean":
