@@ -24,6 +24,13 @@ VarOpt = Annotated[
     list[str] | None, typer.Option("--var", help="Variable to include (repeatable; default: all).")
 ]
 CrsOpt = Annotated[str | None, typer.Option("--crs", help="CRS of the input if not detectable.")]
+FillOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--fill-value",
+        help="Nodata value of a variable as NAME=VALUE (repeatable; overrides the input's fill).",
+    ),
+]
 ResamplingOpt = Annotated[
     list[str] | None,
     typer.Option(
@@ -161,6 +168,25 @@ def _tile(value: str) -> int:
         raise ValueError(f"--tile-size: invalid value {value!r}; expected an integer.") from None
 
 
+def _parse_fill_values(values: list[str] | None) -> dict[str, int | float] | None:
+    """Repeatable ``NAME=VALUE`` pairs (D-61); VALUE is an int, else a float (``nan`` allowed)."""
+    out: dict[str, int | float] = {}
+    for v in values or []:
+        name, _, text = v.rpartition("=")
+        if not name or not text:
+            raise ValueError(f"--fill-value: malformed pair {v!r}; expected var=value.")
+        try:
+            out[name] = int(text)
+        except ValueError:
+            try:
+                out[name] = float(text)
+            except ValueError:
+                raise ValueError(
+                    f"--fill-value: invalid value {text!r} for {name!r}; expected a number."
+                ) from None
+    return out or None
+
+
 def _data_var_names(ds: xr.Dataset) -> list[str]:
     """Variables a per-variable mapping can name: >= 2-D data variables (no grid mapping)."""
     return [str(n) for n, v in ds.data_vars.items() if v.ndim >= 2]
@@ -196,6 +222,7 @@ def convert(
     output: Annotated[str, typer.Argument(metavar="OUT", help="Output Zarr store.")],
     var: VarOpt = None,
     crs: CrsOpt = None,
+    fill_value: FillOpt = None,
     resampling: ResamplingOpt = None,
     tile_size: TileOpt = None,
     max_levels: LevelsOpt = None,
@@ -215,6 +242,7 @@ def convert(
         result = ds.geozarr.to_pyramid(
             output,
             crs=crs,
+            fill_values=_parse_fill_values(fill_value),
             resampling=method,
             tile_size=_parse_size_opts(tile_size, names, "--tile-size", _tile, 512),
             max_levels=max_levels,
@@ -243,6 +271,7 @@ def plan(
     input: Annotated[str, typer.Argument(metavar="IN", help="Input file, Zarr store or URL.")],
     var: VarOpt = None,
     crs: CrsOpt = None,
+    fill_value: FillOpt = None,
     resampling: ResamplingOpt = None,
     tile_size: TileOpt = None,
     max_levels: LevelsOpt = None,
@@ -254,6 +283,7 @@ def plan(
         names = _data_var_names(ds)
         result = ds.geozarr.plan(
             crs=crs,
+            fill_values=_parse_fill_values(fill_value),
             resampling=_parse_resampling(resampling),
             tile_size=_parse_size_opts(tile_size, names, "--tile-size", _tile, 512),
             max_levels=max_levels,

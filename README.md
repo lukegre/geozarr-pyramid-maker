@@ -36,7 +36,7 @@ gpm.preview("basal_melt.zarr", serve=True)  # OpenLayers page + local CORS/Range
 tree = xr.open_datatree("basal_melt.zarr", engine="zarr")  # levels "0" ... "N"
 ```
 
-`to_pyramid` options (all keyword-only): `crs`, `resampling` (`"auto"`, a method, or `{var: method}`; methods `mean`,
+`to_pyramid` options (all keyword-only): `crs`, `fill_values` (a `{var: value}` nodata override, D-61), `resampling` (`"auto"`, a method, or `{var: method}`; methods `mean`,
 `nearest`, `mode`, `min`, `max`), `tile_size=512` (an int or a `{var: px}` mapping), `shard_size=None` (automatic; or a pixel shape such as `2048` or `{"time": 12, "y": 2048, "x": 2048}`, optionally per variable; `-1` means the whole dim, and `y`/`x` name the spatial dims whatever they are called), `max_levels`, `compression_level=3`,
 `overwrite=False`, `validate=True`, `preview=False`, `storage_options`. Use `gpm.configure_logging("INFO")` to see progress.
 
@@ -99,7 +99,8 @@ out.zarr/                 zarr.json: zarr_conventions (multiscales, spatial:, pr
   so GDAL, QGIS and rioxarray see the CRS.
 - **Integer fill rule (D-20)**: Zarr v3 needs a `fill_value` and viewers treat it as nodata. Floats use NaN. Ints keep a
   declared `_FillValue`; ints without one get a sentinel (dtype min for signed, max for unsigned) so valid zeros stay
-  visible. Padding and antimeridian gaps use the sentinel.
+  visible. Padding and antimeridian gaps use the sentinel. A Zarr v3 input's own non-zero `fill_value` counts as
+  declared (zarr's default 0 does not); `fill_values={"var": -1}` (CLI `--fill-value var=-1`) overrides it (D-61).
 
 ## Known limitations
 

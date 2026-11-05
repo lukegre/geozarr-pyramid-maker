@@ -22,13 +22,14 @@ class _GeoZarrAccessor:
         self,
         *,
         crs: Any = None,
+        fill_values: Mapping[str, int | float] | None = None,
         resampling: str | Mapping[str, str] = "auto",
         tile_size: int | Mapping[str, int] = 512,
         max_levels: int | None = None,
         shard_size: int | Mapping[str, Any] | None = None,
     ) -> PyramidPlan:
         """Dry run: detect the grid and return the pyramid plan without touching any data."""
-        _, grid = detect(self._obj, crs=crs)
+        _, grid = detect(self._obj, crs=crs, fill_values=fill_values)
         plan = build_plan(
             grid,
             resampling=resampling,

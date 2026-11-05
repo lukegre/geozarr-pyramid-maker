@@ -211,3 +211,73 @@ def test_variables_attr_and_preview_order(multi_var, tmp_path):
     assert order.index("melt") < order.index("mask")
     names = [v["name"] for v in pv.read_config(store)["variables"]]
     assert names.index("melt") < names.index("mask")
+
+
+# ------------------------------------------------------------- D-61 fill_values / Zarr v3 fill
+
+
+def _zarr_input(tmp_path, dtype="int16", fill=-1, name="v"):
+    """A Zarr v3 array with the given on-disk fill, reopened lazily with xr.open_zarr."""
+    data = (np.arange(40 * 36).reshape(40, 36) % 7).astype(dtype)
+    ds = _grid(data, name=name).drop_vars("spatial_ref")
+    p = tmp_path / "in.zarr"
+    ds.to_zarr(p, zarr_format=3, consolidated=False, encoding={name: {"fill_value": fill}})
+    return xr.open_zarr(p, consolidated=False).rio.write_crs("EPSG:3031")
+
+
+def test_zarr_v3_fill_value_is_declared_on_every_level(tmp_path):
+    src = _zarr_input(tmp_path, fill=-1)
+    assert src["v"].dtype == np.int16  # xarray leaves ints undecoded; fill only in encoding
+    _, grid = detect(src)
+    assert grid.variables[0].fill_value == -1
+    assert grid.variables[0].fill_declared is True
+    store = _write(src, tmp_path)
+    for k in _levels(store):
+        assert _disk_fill(store, k, "v") == -1
+
+
+def test_zarr_v3_default_zero_fill_is_not_declared(tmp_path):
+    src = _zarr_input(tmp_path, fill=0)
+    _, grid = detect(src)
+    assert grid.variables[0].fill_declared is False
+    assert grid.variables[0].fill_value == -32768  # sentinel as today; real zeros stay visible
+    store = _write(src, tmp_path)
+    for k in _levels(store):
+        assert _disk_fill(store, k, "v") == -32768
+
+
+def test_zarr_v3_nonzero_float_fill_is_declared(tmp_path):
+    src = _zarr_input(tmp_path, dtype="float32", fill=-9999.0)
+    _, grid = detect(src)
+    assert grid.variables[0].fill_declared is True
+    assert math.isnan(grid.variables[0].fill_value)
+
+
+def test_fill_values_override_wins_over_fill_value_attr():
+    data = (np.arange(40 * 36).reshape(40, 36) % 7).astype("int16")
+    ds = _grid(data, {"_FillValue": -9})
+    _, grid = detect(ds, fill_values={"v": -5})
+    assert grid.variables[0].fill_value == -5
+    assert grid.variables[0].fill_declared is True
+
+
+def test_fill_values_override_written_to_zarr(tmp_path):
+    src = _zarr_input(tmp_path, fill=0)
+    store = _write(src, tmp_path, fill_values={"v": -5})
+    for k in _levels(store):
+        assert _disk_fill(store, k, "v") == -5
+
+
+def test_fill_values_unknown_variable_raises():
+    ds = _grid(np.zeros((8, 8), "int16"))
+    with pytest.raises(ValueError, match="unknown variable"):
+        detect(ds, fill_values={"nope": 1})
+
+
+@pytest.mark.parametrize(
+    ("dtype", "value"), [("int8", 300), ("int16", 1.5), ("int16", float("nan")), ("uint8", -1)]
+)
+def test_fill_values_not_fitting_dtype_raises(dtype, value):
+    ds = _grid(np.zeros((8, 8), dtype))
+    with pytest.raises(ValueError, match="does not fit"):
+        detect(ds, fill_values={"v": value})

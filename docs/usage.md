@@ -37,6 +37,7 @@ All keyword-only:
 | Option | Meaning |
 |---|---|
 | `crs` | Override or supply the CRS of the source |
+| `fill_values` | `{var: value}` nodata override; wins over the input's fill and counts as declared. Unknown names or values that do not fit the dtype raise `ValueError`. A Zarr v3 input's non-zero `fill_value` is picked up automatically, a zero one (zarr's default) is not (D-61). CLI: `--fill-value NAME=VALUE` |
 | `resampling` | `"auto"`, a method, or `{var: method}`; methods `mean`, `nearest`, `mode`, `min`, `max` |
 | `tile_size` | Inner chunk size, default `512`; an int, or `{var: size}` (unlisted variables keep the default) |
 | `max_levels` | Limit the number of pyramid levels |

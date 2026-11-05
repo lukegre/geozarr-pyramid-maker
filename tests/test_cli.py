@@ -7,7 +7,14 @@ from typer.testing import CliRunner
 from zarr.storage import LocalStore
 
 import geozarr_pyramid_maker as gpm
-from geozarr_pyramid_maker.cli import _open_input, _parse_resampling, _parse_size_opts, _shard, app
+from geozarr_pyramid_maker.cli import (
+    _open_input,
+    _parse_fill_values,
+    _parse_resampling,
+    _parse_size_opts,
+    _shard,
+    app,
+)
 
 runner = CliRunner()
 
@@ -273,3 +280,12 @@ def test_shard_option_whole_dim_and_aliases():
     assert _parse_size_opts(["a=time:-1,y:64,x:64"], ["a"], "--shard-size", _shard, None) == {
         "a": {"time": -1, "y": 64, "x": 64}
     }
+
+
+def test_parse_fill_values():
+    assert _parse_fill_values(None) is None
+    assert _parse_fill_values(["a=-1", "b=nan"])["a"] == -1
+    assert _parse_fill_values(["b=-9999.5"]) == {"b": -9999.5}
+    for bad in ("a", "a=", "a=x"):
+        with pytest.raises(ValueError, match="--fill-value"):
+            _parse_fill_values([bad])
