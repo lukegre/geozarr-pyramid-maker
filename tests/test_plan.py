@@ -7,6 +7,7 @@ import numpy as np
 import pyproj
 import pytest
 import xarray as xr
+from loguru import logger
 
 import geozarr_pyramid_maker as gpm
 from geozarr_pyramid_maker import DetectionError, PyramidPlan, build_plan, detect
@@ -111,8 +112,8 @@ def test_antimeridian_levels(regional_antimeridian):
 def test_worked_example_utm(regional_utm):
     plan = _plan(regional_utm)
     assert [lv.shape for lv in plan.levels] == [(1001, 777), (501, 389)]
-    assert plan.tile_size == 512
-    assert plan.shard_size == 128 * 1024**2
+    assert set(plan.tile_size.values()) == {512}
+    assert set(plan.shard_size.values()) == {None}
 
 
 # ------------------------------------------------------------------ resampling
@@ -246,9 +247,10 @@ def test_max_levels():
 
 
 def test_tile_size_and_shard_size_passthrough():
-    plan = build_plan(_grid(1000, 1000), tile_size=256, shard_size="8MiB")
-    assert plan.tile_size == 256
-    assert plan.shard_size == 8 * 1024**2
+    plan = build_plan(_grid(1000, 1000), tile_size=256, shard_size=512)
+    assert set(plan.tile_size.values()) == {256}
+    assert plan.shard_size == {"v": {"y": 512, "x": 512}}
+    assert plan.levels[0].chunks["v"].shards == (512, 512)
     assert [lv.shape for lv in plan.levels] == [(1000, 1000), (500, 500), (250, 250)]
     assert plan.levels[0].chunks["v"].chunks == (256, 256)
 
@@ -261,6 +263,8 @@ def test_validation_errors():
         build_plan(grid, max_levels=0)
     with pytest.raises(ValueError):
         build_plan(grid, shard_size="junk")
+    with pytest.raises(ValueError, match="pixels"):
+        build_plan(grid, shard_size="128MiB")
 
 
 # ------------------------------------------------------------------ repr
@@ -311,7 +315,7 @@ def test_accessor_dataset(polar_3031):
 def test_accessor_dataarray(regional_utm):
     plan = regional_utm["dem"].geozarr.plan(max_levels=1, tile_size=256)
     assert len(plan.levels) == 1
-    assert plan.tile_size == 256
+    assert set(plan.tile_size.values()) == {256}
     assert list(plan.resampling) == ["dem"]
 
 
@@ -364,3 +368,118 @@ def test_public_api():
         assert name in gpm.__all__
         assert hasattr(gpm, name)
     assert hasattr(xr.Dataset, "geozarr") and hasattr(xr.DataArray, "geozarr")
+
+
+# ------------------------------------------------------------------ per-variable sizes (D-57)
+
+
+def _two_vars(ny=1000, nx=1000):
+    return _grid(ny, nx, variables=(_var("a", shape=(ny, nx)), _var("b", shape=(ny, nx))))
+
+
+def test_scalar_sizes_resolve_to_mappings():
+    plan = build_plan(_two_vars(), tile_size=256, shard_size=512)
+    assert plan.tile_size == {"a": 256, "b": 256}
+    assert plan.shard_size == {"a": {"y": 512, "x": 512}, "b": {"y": 512, "x": 512}}
+
+
+def test_mapping_sizes_per_variable_with_defaults():
+    plan = build_plan(_two_vars(), tile_size={"a": 128}, shard_size={"b": 1024})
+    assert plan.tile_size == {"a": 128, "b": 512}
+    assert plan.shard_size == {"a": None, "b": {"y": 1024, "x": 1024}}
+    chunks = plan.levels[0].chunks
+    assert chunks["a"].chunks == (128, 128)
+    assert chunks["b"].chunks == (512, 512)
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [{"tile_size": {"nope": 64}}, {"shard_size": {"nope": 1024}}],
+)
+def test_mapping_unknown_variable(kw):
+    with pytest.raises(ValueError, match="nope"):
+        build_plan(_two_vars(), **kw)
+
+
+def test_mapping_values_below_one():
+    with pytest.raises(ValueError, match="tile_size"):
+        build_plan(_two_vars(), tile_size={"a": 0})
+    with pytest.raises(ValueError):
+        build_plan(_two_vars(), shard_size={"a": 0})
+    with pytest.raises(ValueError):
+        build_plan(_two_vars(), shard_size={"y": 0, "x": 512})
+
+
+def test_levels_stop_at_smallest_tile():
+    plan = build_plan(_two_vars(1000, 1000), tile_size={"a": 100, "b": 400})
+    # 1000 -> 500 -> 250 -> 125 -> 63: stops once max(ny, nx) <= 100
+    assert [lv.shape[0] for lv in plan.levels] == [1000, 500, 250, 125, 63]
+    # the larger tile gets one clipped chunk at the top level
+    assert plan.levels[-1].chunks["b"].chunks == (63, 63)
+    assert plan.levels[-1].chunks["a"].chunks == (63, 63)
+    assert plan.levels[2].chunks["b"].chunks == (250, 250)
+
+
+def test_repr_uniform_header_and_lines():
+    text = repr(build_plan(_two_vars(), tile_size=256, shard_size=512))
+    assert "tile: 256 px   shard: y 512 × x 512" in text
+    assert "per variable" not in text
+    assert "    a: mean, float32\n" in text
+    assert "shard: auto" in repr(build_plan(_two_vars()))
+
+
+def test_repr_mixed_per_variable():
+    text = repr(build_plan(_two_vars(), tile_size={"a": 256}, shard_size={"b": 1024}))
+    assert "tile/shard: per variable" in text
+    assert "    a: mean, float32, tile 256 px, shard auto" in text
+    assert "    b: mean, float32, tile 512 px, shard y 1024 × x 1024" in text
+
+
+def _time_grid():
+    v = _var("a", extra={"time": 20}, shape=(1000, 1000))
+    v = VarInfo(**{**v.__dict__, "dims": ("time", "y", "x")})
+    g = _grid(1000, 1000, variables=(v,), extra_dims={"time": 20})
+    return g
+
+
+def test_shard_dim_mapping_for_all_variables():
+    plan = build_plan(_time_grid(), tile_size=100, shard_size={"time": 12, "y": 500, "x": 500})
+    assert plan.shard_size["a"] == {"time": 12, "y": 500, "x": 500}
+    assert plan.levels[0].chunks["a"].shards == (12, 500, 500)
+    # same pixels at every level, clipped to the extent (250 -> 3 chunks of 100 = 300)
+    assert plan.levels[2].chunks["a"].shards == (12, 300, 300)
+    assert "shard: time 12 × y 500 × x 500" in repr(plan)
+
+
+def test_shard_clipped_extra_dim_and_unsharded_result():
+    plan = build_plan(_time_grid(), tile_size=100, shard_size={"time": 99, "y": 100, "x": 100})
+    assert plan.levels[0].chunks["a"].shards == (20, 100, 100)
+    # a shard of one chunk is no shard
+    plan = build_plan(_time_grid(), tile_size=100, shard_size=100)
+    assert plan.levels[0].chunks["a"].shards is None
+
+
+def test_shard_rounded_up_to_tile_multiple_with_warning():
+    msgs = []
+    sink = logger.add(msgs.append, level="WARNING")
+    try:
+        plan = build_plan(_two_vars(), tile_size=100, shard_size=250)
+    finally:
+        logger.remove(sink)
+    assert plan.shard_size["a"] == {"y": 300, "x": 300}
+    assert any("300" in str(m) for m in msgs)
+
+
+def test_shard_per_variable_spec_and_auto_for_unlisted():
+    plan = build_plan(_two_vars(), tile_size=100, shard_size={"a": {"y": 400, "x": 200}, "b": None})
+    assert plan.shard_size == {"a": {"y": 400, "x": 200}, "b": None}
+    assert plan.levels[0].chunks["a"].shards == (400, 200)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"y": 512}, {"y": 512, "x": 512, "foo": 2}, {"a": 512, "y": 512}, {"nope": 512}, "128MiB"],
+)
+def test_shard_spec_errors(bad):
+    with pytest.raises(ValueError):
+        build_plan(_two_vars(), shard_size=bad)

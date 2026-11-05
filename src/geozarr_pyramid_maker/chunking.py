@@ -20,6 +20,7 @@ _UNITS: dict[str, int] = {
 }
 _SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-z]*)\s*$", re.IGNORECASE)
 _MAX_UNSHARDED_CHUNKS = 4
+AUTO_SHARD_BYTES = 128 * 1024**2  # uncompressed target of the automatic shard choice (D-06)
 
 
 def parse_size(size: int | str) -> int:
@@ -112,4 +113,26 @@ def choose_chunks(
         chunks,
         shards,
     )
+    return ChunkSpec(chunks=chunks, shards=shards, itemsize=itemsize)
+
+
+def fixed_chunks(
+    shape: tuple[int, ...], itemsize: int, *, tile_size: int, shard: tuple[int, ...]
+) -> ChunkSpec:
+    """Chunks plus a user-given shard shape (pixels per dim of ``shape``), clipped to ``shape``.
+
+    Spatial shard values must be multiples of ``tile_size``. The result is unsharded when the
+    clipped shard equals the chunk shape (D-58).
+    """
+    if len(shape) < 2 or len(shard) != len(shape):
+        raise ValueError(f"shape {shape} and shard {shard} need the same length, at least 2")
+    *extra, ny, nx = shape
+    chunks = (*([1] * len(extra)), min(tile_size, ny), min(tile_size, nx))
+    lead = tuple(min(s, n) for s, n in zip(shard[:-2], extra, strict=True))
+    shard_y = min(shard[-2], math.ceil(ny / chunks[-2]) * chunks[-2])
+    shard_x = min(shard[-1], math.ceil(nx / chunks[-1]) * chunks[-1])
+    shards = (*lead, shard_y, shard_x)
+    if shards == chunks:
+        return ChunkSpec(chunks=chunks, shards=None, itemsize=itemsize)
+    assert all(s % c == 0 for s, c in zip(shards, chunks, strict=True)), (shards, chunks)
     return ChunkSpec(chunks=chunks, shards=shards, itemsize=itemsize)

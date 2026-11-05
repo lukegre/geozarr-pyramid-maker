@@ -1,7 +1,7 @@
 """Command-line interface (``geozarr-pyramid``). The CLI may configure logging (D-08)."""
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -31,9 +31,23 @@ ResamplingOpt = Annotated[
         help="Method for all variables (e.g. mean), or repeatable var=method pairs.",
     ),
 ]
-TileOpt = Annotated[int, typer.Option("--tile-size", help="Tile edge length in pixels.")]
+TileOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--tile-size",
+        help="Tile edge length in pixels for all variables (default 512), "
+        "and/or repeatable var=pixels pairs.",
+    ),
+]
 LevelsOpt = Annotated[int | None, typer.Option("--max-levels", help="Maximum number of levels.")]
-ShardOpt = Annotated[str, typer.Option("--shard-size", help="Target shard size, e.g. 128MiB.")]
+ShardOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--shard-size",
+        help="Shard shape in pixels: N (N x N), or dim:px pairs like time:12,y:2048,x:2048; "
+        "for all variables and/or repeatable var=SHAPE (default: automatic).",
+    ),
+]
 
 
 @app.callback()
@@ -126,8 +140,53 @@ def _select(ds: xr.Dataset, var: list[str] | None) -> xr.Dataset:
     )
 
 
-def _shard(value: str) -> int | str:
-    return int(value) if value.isdigit() else value
+def _shard(value: str) -> int | dict[str, int]:
+    """'2048' -> 2048, 'time:12,y:2048,x:2048' -> {'time': 12, ...} (pixels)."""
+    try:
+        if ":" not in value:
+            return int(value)
+        return {k: int(n) for k, _, n in (p.partition(":") for p in value.split(","))}
+    except ValueError:
+        raise ValueError(
+            f"--shard-size: invalid shape {value!r}; shard size is in pixels "
+            "(N or dim:px,dim:px), not bytes."
+        ) from None
+
+
+def _tile(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"--tile-size: invalid value {value!r}; expected an integer.") from None
+
+
+def _data_var_names(ds: xr.Dataset) -> list[str]:
+    """Variables a per-variable mapping can name: >= 2-D data variables (no grid mapping)."""
+    return [str(n) for n, v in ds.data_vars.items() if v.ndim >= 2]
+
+
+def _parse_size_opts[T](
+    values: list[str] | None, names: list[str], flag: str, convert: Callable[[str], T], default: T
+) -> T | dict[str, T]:
+    """A bare default and/or ``NAME=VALUE`` overrides (D-57, D-58).
+
+    Only a default gives a plain value; with overrides, a mapping over ``names`` (default first).
+    Unknown override names are kept so ``build_plan`` reports them.
+    """
+    bare = [v for v in values or [] if "=" not in v]
+    if len(bare) > 1:
+        raise ValueError(f"{flag}: give at most one default value, plus var=value pairs.")
+    base = convert(bare[0]) if bare else default
+    pairs = [v for v in values or [] if "=" in v]
+    if not pairs:
+        return base
+    out = dict.fromkeys(names, base)
+    for v in pairs:
+        name, _, text = v.rpartition("=")
+        if not name or not text:
+            raise ValueError(f"{flag}: malformed pair {v!r}; expected var=value.")
+        out[name] = convert(text)
+    return out
 
 
 @app.command()
@@ -137,9 +196,9 @@ def convert(
     var: VarOpt = None,
     crs: CrsOpt = None,
     resampling: ResamplingOpt = None,
-    tile_size: TileOpt = 512,
+    tile_size: TileOpt = None,
     max_levels: LevelsOpt = None,
-    shard_size: ShardOpt = "128MiB",
+    shard_size: ShardOpt = None,
     compression_level: Annotated[int, typer.Option("--compression-level")] = 3,
     overwrite: Annotated[
         bool, typer.Option("--overwrite", help="Replace an existing OUT.")
@@ -151,13 +210,14 @@ def convert(
     with _clean_errors():
         method = _parse_resampling(resampling)
         ds = _select(_open_input(input), var)
+        names = _data_var_names(ds)
         result = ds.geozarr.to_pyramid(
             output,
             crs=crs,
             resampling=method,
-            tile_size=tile_size,
+            tile_size=_parse_size_opts(tile_size, names, "--tile-size", _tile, 512),
             max_levels=max_levels,
-            shard_size=_shard(shard_size),
+            shard_size=_parse_size_opts(shard_size, names, "--shard-size", _shard, None),
             compression_level=compression_level,
             overwrite=overwrite,
             validate=not no_validate,
@@ -183,19 +243,20 @@ def plan(
     var: VarOpt = None,
     crs: CrsOpt = None,
     resampling: ResamplingOpt = None,
-    tile_size: TileOpt = 512,
+    tile_size: TileOpt = None,
     max_levels: LevelsOpt = None,
-    shard_size: ShardOpt = "128MiB",
+    shard_size: ShardOpt = None,
 ) -> None:
     """Print the pyramid plan for IN without writing anything."""
     with _clean_errors():
         ds = _select(_open_input(input), var)
+        names = _data_var_names(ds)
         result = ds.geozarr.plan(
             crs=crs,
             resampling=_parse_resampling(resampling),
-            tile_size=tile_size,
+            tile_size=_parse_size_opts(tile_size, names, "--tile-size", _tile, 512),
             max_levels=max_levels,
-            shard_size=_shard(shard_size),
+            shard_size=_parse_size_opts(shard_size, names, "--shard-size", _shard, None),
         )
     typer.echo(repr(result))
 

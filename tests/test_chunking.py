@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from geozarr_pyramid_maker.chunking import ChunkSpec, choose_chunks, parse_size
+from geozarr_pyramid_maker.chunking import ChunkSpec, choose_chunks, fixed_chunks, parse_size
 
 MiB = 1024**2
 
@@ -170,3 +170,15 @@ def test_no_loguru_handlers_added():
     before = dict(logger._core.handlers)
     choose_chunks((2000, 2000), 4)
     assert dict(logger._core.handlers) == before
+
+
+def test_fixed_chunks_clips_and_unshards():
+    spec = fixed_chunks((3, 100, 90), 4, tile_size=32, shard=(2, 64, 64))
+    assert spec.chunks == (1, 32, 32) and spec.shards == (2, 64, 64)
+    # spatial shard larger than the extent: whole number of chunks; extra dim clipped
+    spec = fixed_chunks((3, 100, 90), 4, tile_size=32, shard=(9, 640, 640))
+    assert spec.shards == (3, 128, 96)
+    spec = fixed_chunks((100, 90), 4, tile_size=32, shard=(32, 32))
+    assert spec.shards is None
+    # no small-array "no shard" rule: 2x2 chunks stay sharded
+    assert fixed_chunks((60, 60), 4, tile_size=32, shard=(64, 64)).shards == (64, 64)

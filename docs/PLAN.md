@@ -54,9 +54,9 @@ to_pyramid(
     *,
     crs=None,                   # override auto-detection (anything pyproj.CRS accepts)
     resampling="auto",          # "auto" | method | {var: method}; methods: mean, nearest, mode, min, max
-    tile_size=512,              # inner chunk edge in px (the viewer tile size)
+    tile_size=512,              # inner chunk edge in px (the viewer tile size); int or {var: px} (D-57)
     max_levels=None,            # default: until the grid fits in one tile
-    shard_size="128MiB",        # target uncompressed shard size
+    shard_size=None,            # None = automatic (~128 MiB); or px shape: int, {dim: px}, {var: ...} (D-58)
     compression_level=3,        # zstd
     overwrite=False,            # never delete existing data silently
     validate=True,
@@ -67,7 +67,7 @@ to_pyramid(
 
 CLI (typer), a thin wrapper over the same functions:
 ```
-geozarr-pyramid convert IN OUT [--var NAME ...] [--crs EPSG:3031] [--tile-size 512] [--overwrite]
+geozarr-pyramid convert IN OUT [--var NAME ...] [--crs EPSG:3031] [--tile-size 512 | --tile-size NAME=512 ...] [--overwrite]
 geozarr-pyramid plan IN
 geozarr-pyramid validate STORE
 geozarr-pyramid preview STORE [--serve] [--port 8000]
@@ -116,7 +116,7 @@ Because odd edges are padded rather than trimmed (§4.3), the origin never moves
 `PyramidPlan` is a frozen dataclass: CRS, dims, per-variable resampling, and a list of `LevelPlan`s
 (`shape`, `transform`, `bbox`, `chunks`, `shards`, `nbytes`). Its `__repr__` prints a table; `ds.geozarr.plan()` returns it.
 
-- **Number of levels**: keep halving until `max(ny, nx) <= tile_size` (at least 1 level). `max_levels` caps it.
+- **Number of levels**: keep halving until `max(ny, nx) <=` the smallest `tile_size` of any variable (at least 1 level). `max_levels` caps it.
 - **Level shape**: `ceil(n / 2)` at each step (padding).
 - **Level transform**: `a, e` ×2 per level; `c, f` (origin) unchanged.
 
@@ -136,7 +136,7 @@ Because odd edges are padded rather than trimmed (§4.3), the origin never moves
 For each level and variable, with `itemsize` from the dtype:
 1. **Inner chunk**: spatial `tile_size × tile_size` (clipped to the shape); every non-spatial dim is 1 (one time step per tile,
    which is what viewers request).
-2. **Shard (spatial)**: `k × k` chunks, where `k` is the largest power of 2 with `k²·tile²·itemsize <= shard_size`
+2. **Shard (spatial)**: `k × k` chunks, where `k` is the largest power of 2 with `k²·tile²·itemsize <= 128 MiB` (automatic choice; `shard_size` can give a pixel shape instead, D-58)
    (float32 at 512 px gives k=8, so 4096² px and 64 MiB shards).
 3. **Shard (non-spatial)**: if the spatial shard covers the whole level and is still below the target, extend the shard along
    the leading non-spatial dim (e.g. several time steps per shard) to reduce the object count at coarse levels.

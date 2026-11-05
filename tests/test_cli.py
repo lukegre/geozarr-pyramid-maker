@@ -1,11 +1,13 @@
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 from loguru import logger
 from typer.testing import CliRunner
+from zarr.storage import LocalStore
 
 import geozarr_pyramid_maker as gpm
-from geozarr_pyramid_maker.cli import _open_input, _parse_resampling, app
+from geozarr_pyramid_maker.cli import _open_input, _parse_resampling, _parse_size_opts, _shard, app
 
 runner = CliRunner()
 
@@ -181,3 +183,78 @@ def test_preview_demo_conflicts(monkeypatch, extra):
     monkeypatch.setattr(pv, "serve_viewer", lambda *a, **k: pytest.fail("must not serve"))
     r = runner.invoke(app, ["preview", "--demo", *extra])
     assert r.exit_code == 2
+
+
+def test_parse_size_opts():
+    names = ["a", "b"]
+    assert _parse_size_opts(None, names, "--tile-size", int, 512) == 512
+    assert _parse_size_opts(["256"], names, "--tile-size", int, 512) == 256
+    got = _parse_size_opts(["256", "b=64"], names, "--tile-size", int, 512)
+    assert got == {"a": 256, "b": 64}
+    got = _parse_size_opts(["x=1"], names, "--tile-size", int, 512)
+    assert got == {"a": 512, "b": 512, "x": 1}
+
+
+def test_shard_option_values():
+    assert _shard("2048") == 2048
+    assert _shard("time:12,y:2048,x:2048") == {"time": 12, "y": 2048, "x": 2048}
+    with pytest.raises(ValueError, match="pixels"):
+        _shard("128MiB")
+    got = _parse_size_opts(
+        ["a=time:2,y:64,x:64", "b=64"], ["a", "b", "c"], "--shard-size", _shard, None
+    )
+    assert got == {"a": {"time": 2, "y": 64, "x": 64}, "b": 64, "c": None}
+    assert _parse_size_opts(["128", "a=64"], ["a", "b"], "--shard-size", _shard, None) == {
+        "a": 64,
+        "b": 128,
+    }
+
+
+def test_tile_size_per_variable(nc_in):
+    r = _run("plan", nc_in, "--tile-size", "melt=16", "--tile-size", "mask=32")
+    assert r.exit_code == 0, r.stderr
+    assert "tile/shard: per variable" in r.stdout
+    assert "tile 16 px" in r.stdout
+    assert "tile 32 px" in r.stdout
+
+
+def test_tile_size_default_plus_override(nc_in):
+    r = _run("plan", nc_in, "--tile-size", "32", "--tile-size", "melt=16")
+    assert r.exit_code == 0, r.stderr
+    assert "tile 16 px" in r.stdout
+    assert "tile 32 px" in r.stdout
+
+
+def test_shard_size_per_variable_convert(nc_in, tmp_path):
+    out = tmp_path / "o.zarr"
+    r = _run(
+        "convert", nc_in, out, "--tile-size", 16, "--shard-size", "32",
+        "--shard-size", "melt=time:2,y:32,x:32",
+    )  # fmt: skip
+    assert r.exit_code == 0, r.stderr
+    melt = zarr.open_array(LocalStore(out), path="0/melt", mode="r")
+    assert melt.shards == (2, 32, 32)
+
+
+def test_shard_size_bytes_rejected(nc_in):
+    r = _run("plan", nc_in, "--shard-size", "128MiB")
+    assert r.exit_code == 2
+    assert "pixels" in r.stderr and "Traceback" not in r.stderr
+
+
+def test_two_bare_values_error(nc_in):
+    r = _run("plan", nc_in, "--tile-size", "32", "--tile-size", "64")
+    assert r.exit_code == 2
+    assert "--tile-size" in r.stderr and "Traceback" not in r.stderr
+
+
+def test_unknown_variable_size_error(nc_in):
+    r = _run("plan", nc_in, "--shard-size", "nope=64")
+    assert r.exit_code == 2
+    assert "nope" in r.stderr and "Traceback" not in r.stderr
+
+
+def test_tile_size_not_int_error(nc_in):
+    r = _run("plan", nc_in, "--tile-size", "melt=big")
+    assert r.exit_code == 2
+    assert "--tile-size" in r.stderr
