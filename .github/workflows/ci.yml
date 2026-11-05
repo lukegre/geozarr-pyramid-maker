@@ -21,3 +21,14 @@ jobs:
       - run: uv run --no-sync ruff check
       - run: uv run --no-sync ruff format --check
       - run: uv run --no-sync pytest
+
+  # Early warning for upstream API breaks (e.g. removed keywords); never blocks.
+  test-newest-xarray:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --all-extras
+      - run: uv pip install --upgrade xarray
+      - run: uv run --no-sync pytest
