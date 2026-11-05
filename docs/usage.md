@@ -40,7 +40,7 @@ All keyword-only:
 | `resampling` | `"auto"`, a method, or `{var: method}`; methods `mean`, `nearest`, `mode`, `min`, `max` |
 | `tile_size` | Inner chunk size, default `512`; an int, or `{var: size}` (unlisted variables keep the default) |
 | `max_levels` | Limit the number of pyramid levels |
-| `shard_size` | Shard shape in pixels: `None` (default, automatic, about 128 MiB), `n` (`n × n`), `{"time": 12, "y": 2048, "x": 2048}` (extra dims default to 1), or `{var: that}`; spatial values are rounded up to a multiple of the tile size |
+| `shard_size` | Shard shape in pixels: `None` (default, automatic, about 128 MiB), `n` (`n × n`), `{"time": 12, "y": 2048, "x": 2048}` (extra dims default to 1), or `{var: that}`; spatial values are rounded up to a multiple of the tile size; `-1` means the whole dim, and `"y"`/`"x"` are accepted for the spatial dims whatever they are called (D-59) |
 | `compression_level` | zstd level, default `3` |
 | `overwrite` | Default `False` |
 | `validate` | Validate the result, default `True` |

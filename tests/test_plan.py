@@ -483,3 +483,61 @@ def test_shard_per_variable_spec_and_auto_for_unlisted():
 def test_shard_spec_errors(bad):
     with pytest.raises(ValueError):
         build_plan(_two_vars(), shard_size=bad)
+
+
+def _latlon_grid(ny=1000, nx=1500, depth=3, month=12):
+    dims = ("depth", "month", "latitude", "longitude")
+    v = VarInfo(
+        name="a",
+        dtype=np.dtype("float32"),
+        dims=dims,
+        shape=(depth, month, ny, nx),
+        categorical=False,
+        fill_value=None,
+    )
+    g = _grid(ny, nx, variables=(v,), extra_dims={"depth": depth, "month": month})
+    return GridInfo(**{**g.__dict__, "y_dim": "latitude", "x_dim": "longitude"})
+
+
+def test_shard_whole_dim_and_yx_aliases():
+    plan = build_plan(
+        _latlon_grid(), tile_size=256, shard_size={"y": 2048, "x": 2048, "depth": 1, "month": -1}
+    )
+    assert plan.shard_size["a"] == {"depth": 1, "month": 12, "latitude": 2048, "longitude": 2048}
+    for lv in plan.levels:
+        ny, nx = lv.shape
+        spec = lv.chunks["a"]
+        assert spec.chunks == (1, 1, min(256, ny), min(256, nx))
+        cy, cx = min(256, ny), min(256, nx)  # chunks are clipped to the extent
+        assert spec.shards == (1, 12, min(2048, -(-ny // cy) * cy), min(2048, -(-nx // cx) * cx))
+    assert "latitude 2048" in repr(plan)
+
+
+def test_shard_whole_spatial_dim():
+    plan = build_plan(_latlon_grid(), tile_size=256, shard_size={"y": -1, "x": -1, "depth": 1})
+    assert plan.levels[0].chunks["a"].shards == (1, 1, 1024, 1536)
+
+
+def test_shard_alias_conflicts_and_bad_values():
+    with pytest.raises(ValueError, match="same dim"):
+        build_plan(_latlon_grid(), shard_size={"y": 512, "latitude": 512, "x": 512})
+    with pytest.raises(ValueError):
+        build_plan(_latlon_grid(), tile_size=256, shard_size={"y": 512, "x": 512, "month": 0})
+    with pytest.raises(ValueError):
+        build_plan(_latlon_grid(), tile_size=256, shard_size={"y": 512, "x": 512, "month": -2})
+
+
+def test_shard_yx_alias_does_not_override_real_dims():
+    # literal y/x dims: unchanged; a real non-spatial dim called "y" is not aliased
+    plan = build_plan(_time_grid(), tile_size=100, shard_size={"y": 500, "x": 500, "time": -1})
+    assert plan.levels[0].chunks["a"].shards == (20, 500, 500)
+    g = _latlon_grid(depth=1, month=2)
+    v = VarInfo(**{**g.variables[0].__dict__, "dims": ("y", "x", "latitude", "longitude")})
+    g = GridInfo(**{**g.__dict__, "variables": (v,), "extra_dims": {"y": 1, "x": 2}})
+    spec = {"y": 1, "x": 2, "latitude": 512, "longitude": 512}
+    assert build_plan(g, tile_size=256, shard_size=spec).shard_size["a"] == spec
+
+
+def test_shard_yx_alias_in_per_variable_mapping():
+    plan = build_plan(_latlon_grid(), tile_size=256, shard_size={"a": {"y": 512, "x": 512}})
+    assert plan.shard_size["a"] == {"latitude": 512, "longitude": 512}

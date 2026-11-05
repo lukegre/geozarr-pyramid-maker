@@ -44,7 +44,8 @@ ShardOpt = Annotated[
     list[str] | None,
     typer.Option(
         "--shard-size",
-        help="Shard shape in pixels: N (N x N), or dim:px pairs like time:12,y:2048,x:2048; "
+        help="Shard shape in pixels: N (N x N), or dim:px pairs like time:12,y:2048,x:2048 "
+        "(-1 = whole dim; y/x alias the spatial dims); "
         "for all variables and/or repeatable var=SHAPE (default: automatic).",
     ),
 ]
