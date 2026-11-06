@@ -19,7 +19,7 @@ dependencies = [
     "s3fs>=2026.9.0",
     "typer>=0.12",
     "xarray>=2026.2.0",
-    "zarr>=3.1",
+    "zarr>=3.3",
 ]
 
 [project.scripts]
